@@ -58,7 +58,15 @@ public final class Director {
 	private static IntegratedServer server;
 	private static ServerLevel level;
 	private static UUID playerId;
-	private static int opIdx, warmup, sectionWait, rateFrame;
+	private static int opIdx, warmup, sectionWait, visWait, serverWait, rateFrame;
+	/** Hoogstens zoveel render-frames wachten op één videoframe; daarna toch opnemen (en tellen als glitch-risico). */
+	private static final int MAX_WAIT = 240;
+	public static volatile int holdServer, holdVisible;
+	/** Waarop de opname nu wacht (voor het studio-scherm en om problemen te vinden). */
+	public static volatile String waitReason = "";
+	private static int loadWait;
+	/** Steekproef van verstuurde blokwijzigingen: die moeten op hun tijdstip zichtbaar zijn bij de client. */
+	private static final java.util.ArrayDeque<int[]> visChecks = new java.util.ArrayDeque<>(); // {opIndex, dueFrame}
 	private static boolean hold, finaleDone;
 	private static long rateNs;
 	private static double fakeMs = Double.NaN;
@@ -81,6 +89,20 @@ public final class Director {
 	private static int pendingFrom;
 	private static boolean[] seen;
 	private static final List<Integer> landLag = new ArrayList<>();
+
+	// ---- meting: glitches (regel G1) ----
+	/** Laatste frame waarvan de server de blokwijzigingen helemaal uitgevoerd heeft. */
+	private static volatile int serverDoneFrame;
+	/** Frames opgenomen terwijl de wereld nog niet helemaal opnieuw getekend was (halve chunks = glitch). */
+	static int unsettledFrames;
+	/** Frames opgenomen terwijl de server nog niet klaar was met de blokken die nu in beeld moesten staan. */
+	static int serverLateFrames, maxServerLag;
+
+	/** Het venster werd gesloten tijdens een opname: genegeerd. Laat het zien in het studio-scherm. */
+	public static void closeRefused() {
+		message = "Venster sluiten genegeerd: de opname loopt nog. Druk eerst op Stop opname als je echt wil stoppen.";
+		RegisseurClient.LOG.info("venster sluiten genegeerd tijdens de opname");
+	}
 
 	public static boolean busy() {
 		return phase == Phase.PREPARING || phase == Phase.RECORDING || phase == Phase.FINISHING || phase == Phase.RENDERING;
@@ -180,7 +202,21 @@ public final class Director {
 								fsync, qopts, sopts, placeStyle);
 						GameType mode = sp.gameMode.getGameModeForPlayer();
 						sp.setGameMode(GameType.SPECTATOR);
-						mc.execute(() -> begin(p, mode, fov, sch == null ? 0 : sch.unknown));
+						final int unknown = sch == null ? 0 : sch.unknown;
+						// 5. het landschap rondom aanmaken, zo ver als de camera kan kijken (eenmalig per plek)
+						Thread land = new Thread(() -> {
+							try {
+								Landschap.maakAan(server, level, p, Integer.parseInt(Studio.cfg("maxRenderDistance", "16")),
+										pct -> message = "landschap rondom aanmaken (eenmalig per plek): " + pct + "%");
+								mc.execute(() -> begin(p, mode, fov, unknown));
+							} catch (Throwable t) {
+								RegisseurClient.LOG.error("landschap aanmaken mislukt", t);
+								phase = Phase.ERROR;
+								message = "landschap aanmaken mislukt: " + t.getMessage();
+							}
+						}, "regisseur-landschap");
+						land.setDaemon(true);
+						land.start();
 					} catch (Throwable t) {
 						RegisseurClient.LOG.error("show voorbereiden mislukt", t);
 						phase = Phase.ERROR;
@@ -218,6 +254,11 @@ public final class Director {
 			fakeMs = Double.NaN;
 			lead = Float.parseFloat(Studio.cfg("landLeadFrames", "3")) / Recorder.FPS;
 			Camera.reset(p);
+			serverDoneFrame = -1;
+			holdServer = holdVisible = visWait = serverWait = loadWait = 0;
+			waitReason = "";
+			visChecks.clear();
+			unsettledFrames = serverLateFrames = maxServerLag = 0;
 			pending = p.buildTargets.toArray(new ShowPlan.Op[0]);
 			Arrays.sort(pending, (x, y) -> Float.compare(x.t, y.t));
 			seen = new boolean[pending.length];
@@ -229,13 +270,17 @@ public final class Director {
 			prevClouds = mc.options.cloudStatus().get();
 			if (ext[0] > CLOUD_Y - 8) mc.options.cloudStatus().set(CloudStatus.OFF);
 			// zichtafstand: alles tot een stuk voorbij het verste camerapunt moet geladen zijn, anders zit het beeld
-			// in de mist. Hoogstens 16 chunks, dat kan een Iris Xe nog aan.
+			// in de mist. Standaard hoogstens 16 chunks; voor reuzen (kathedraal) kan config "maxRenderDistance" tot 32.
+			// De opname is frame-locked: een hogere zichtafstand maakt de opname trager, niet de video.
+			int maxRd = Math.max(2, Math.min(32, Integer.parseInt(Studio.cfg("maxRenderDistance", "16"))));
 			int need = (int) Math.ceil((ext[1] + p.half + 48) / 16.0);
 			prevRenderDistance = mc.options.renderDistance().get();
-			if (need > prevRenderDistance) mc.options.renderDistance().set(Math.min(16, need));
-			warmup = Math.max(warmup, need > prevRenderDistance ? 120 : 30); // nieuwe chunks laten inladen
+			if (need > prevRenderDistance) mc.options.renderDistance().set(Math.min(maxRd, need));
+			int rd = mc.options.renderDistance().get();
+			warmup = Math.max(warmup, need > prevRenderDistance ? 120 + 15 * Math.max(0, rd - 16) : 30); // nieuwe chunks laten inladen (32 chunks: 360 frames)
 
 			ShowReport.write(runDir, plan, false, landLag);
+			Tijdschatting.begin(p.total());
 			phase = Phase.RECORDING;
 			message = p.terraOps + " terraform-blokken, " + p.buildOps + " bouwblokken"
 					+ (p.sync != null ? String.format(", muziek %.0f BPM", p.sync.bpm) : "")
@@ -261,13 +306,19 @@ public final class Director {
 
 		// Wachtframes: dit frame wordt niet opgenomen (de videotijd staat stil).
 		if (!pl.isSpectator()) { hold = true; return; }
-		if (warmup > 0) { warmup--; hold = true; return; } // chunks en nieuwe resolutie laten bijkomen
+		if (warmup > 0) { warmup--; hold = true; waitReason = "opwarmen"; return; } // chunks en nieuwe resolutie laten bijkomen
+		if (frame == 0 && !(siteLoaded(mc) && viewLoaded(mc)) && loadWait++ < 60 * 120) { hold = true; heldFrames++; waitReason = "bouwterrein en landschap inladen"; return; }
 		hold = rec.busy();
 		if (hold) holdBusy++;
-		// wacht tot de client alle gewijzigde chunks opnieuw heeft opgebouwd (zoals ReplayMod), met een bovengrens
-		if (!hold && !mc.levelRenderer.hasRenderedAllSections() && sectionWait < 12) { sectionWait++; holdSections++; hold = true; }
+		// Geen glitches: een frame wordt pas opgenomen als de wereld echt klaar is. Liever trager dan fout.
+		// 1. de server is klaar met de blokken van het vorige frame
+		if (!hold && serverDoneFrame < frame - 1 && serverWait < MAX_WAIT) { serverWait++; holdServer++; hold = true; waitReason = "server zet nog blokken"; }
+		// 2. de blokken die nu in beeld moeten staan, staan ook echt in de wereld van de client
+		if (!hold && !visibleNow(mc, t) && visWait < MAX_WAIT) { visWait++; holdVisible++; hold = true; }
+		// 3. de client heeft alle gewijzigde chunks opnieuw getekend (zoals ReplayMod)
+		if (!hold && !mc.levelRenderer.hasRenderedAllSections() && sectionWait < MAX_WAIT) { sectionWait++; holdSections++; hold = true; waitReason = "chunks opnieuw tekenen"; }
 		if (hold) { heldFrames++; return; }
-		sectionWait = 0;
+		sectionWait = visWait = serverWait = 0;
 
 		// blokwijzigingen die nu aan de beurt zijn (lead frames vooruit, want de server loopt achter op het beeld)
 		int j = opIdx, n = plan.ops.size();
@@ -281,10 +332,13 @@ public final class Director {
 		final ShowPlan p = plan;
 		final ServerLevel lv = level;
 		final float tv = t + lead;
+		final int thisFrame = frame;
+		queueVisibilityChecks(from, to);
 		server.execute(() -> {
 			p.apply(lv, from, to, tv);
 			if (fx) p.terraformFx(lv, tv, u);
 			if (fin) p.finaleFx(lv);
+			serverDoneFrame = thisFrame;
 		});
 
 		// Houd de wereld (water, deeltjes, wolken) in de pas met de videotijd: trage laptop -> tragere ticks.
@@ -314,12 +368,89 @@ public final class Director {
 	public static void capture() {
 		if (phase != Phase.RECORDING || hold) return;
 		measureLandings(Minecraft.getInstance());
+		measureGlitches(Minecraft.getInstance());
 		rec.capture(frame);
 		frame++;
 		Minecraft mc = Minecraft.getInstance();
 		float mspt = mc.level != null ? mc.level.tickRateManager().millisecondsPerTick() : 50f;
 		if (!Double.isNaN(fakeMs)) fakeMs += mspt * 20.0 / Recorder.FPS;
 		if (frame >= totalFrames) finish();
+	}
+
+	/** Zijn alle chunks van het bouwterrein (plus een rand) bij de client ingeladen? Anders zijn er gaten in beeld. */
+	private static boolean siteLoaded(Minecraft mc) {
+		if (mc.level == null) return false;
+		// alleen het terrein dat echt verandert (vierkant of groef) plus een kleine rand; de overgangsrand van
+		// "vlakmaken" alleen bij die stijl. Te ruim = stukken buiten het bereik van de server = eeuwig wachten.
+		int r = (plan.square ? plan.sqHalf : plan.quarry ? Math.max(plan.qLen, plan.qW) : plan.radius + plan.blend) + 8;
+		for (int x = (plan.cx - r) >> 4; x <= (plan.cx + r) >> 4; x++)
+			for (int z = (plan.cz - r) >> 4; z <= (plan.cz + r) >> 4; z++)
+				if (!mc.level.getChunkSource().hasChunk(x, z)) return false;
+		return true;
+	}
+
+	/** Heeft de client het landschap rond de camera binnen (tot net voor de zichtafstand)? Tot 2% mag nog ontbreken. */
+	private static boolean viewLoaded(Minecraft mc) {
+		if (mc.level == null || mc.player == null) return false;
+		int r = Math.max(2, Math.min(mc.options.renderDistance().get() - 2, 30));
+		int px = mc.player.getBlockX() >> 4, pz = mc.player.getBlockZ() >> 4, missing = 0, total = 0;
+		for (int dx = -r; dx <= r; dx++)
+			for (int dz = -r; dz <= r; dz++) {
+				if (dx * dx + dz * dz > r * r) continue;
+				total++;
+				if (!mc.level.getChunkSource().hasChunk(px + dx, pz + dz)) missing++;
+			}
+		return missing <= total * 0.02;
+	}
+
+	/** Neemt uit elke verstuurde reeks blokwijzigingen een paar steekproeven (eerste, midden, laatste). */
+	private static void queueVisibilityChecks(int from, int to) {
+		if (to <= from) return;
+		int[] picks = to - from <= 3 ? new int[]{from, to - 1} : new int[]{from, (from + to) / 2, to - 1};
+		for (int i : picks) {
+			ShowPlan.Op o = plan.ops.get(i);
+			if (o.fx >= 3) continue; // invliegers worden later echt geplaatst; die controleert de bouwlijst hieronder
+			visChecks.add(new int[]{i, Math.round(o.t * Recorder.FPS) + 1});
+		}
+	}
+
+	/** Staat alles wat op dit moment in beeld moet staan, ook echt in de wereld van de client? */
+	private static boolean visibleNow(Minecraft mc, float t) {
+		if (mc.level == null) return true;
+		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+		// terraform en bouw: steekproeven
+		while (!visChecks.isEmpty()) {
+			int[] c = visChecks.peek();
+			if (frame < c[1]) break; // nog niet aan de beurt
+			ShowPlan.Op o = plan.ops.get(c[0]);
+			boolean loaded = mc.level.getChunkSource().hasChunk(o.x >> 4, o.z >> 4);
+			if (!loaded || mc.level.getBlockState(pos.set(o.x, o.y, o.z)) == o.state || frame > c[1] + 120) { visChecks.poll(); continue; }
+			waitReason = "blok " + o.x + " " + o.y + " " + o.z + " nog niet in beeld";
+			return false;
+		}
+		// bouwwerk: elk blok dat 1 frame geleden had moeten verschijnen
+		if (pending != null) {
+			for (int i = pendingFrom; i < pending.length; i++) {
+				ShowPlan.Op o = pending[i];
+				int planned = Math.round(o.t * Recorder.FPS);
+				if (planned > frame - 1) break;
+				if (seen[i] || frame - planned > 120) continue;
+				if (mc.level.getChunkSource().hasChunk(o.x >> 4, o.z >> 4) && mc.level.getBlockState(pos.set(o.x, o.y, o.z)) != o.state) {
+					waitReason = "bouwblok " + o.x + " " + o.y + " " + o.z + " nog niet in beeld";
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	/** Wordt dit frame "onaf" opgenomen? Telt voor regel G1 (0 is het doel). */
+	private static void measureGlitches(Minecraft mc) {
+		if (!mc.levelRenderer.hasRenderedAllSections()) unsettledFrames++;
+		int leadFrames = Math.round(lead * Recorder.FPS);
+		int lag = frame - serverDoneFrame;
+		maxServerLag = Math.max(maxServerLag, lag);
+		if (lag > leadFrames) serverLateFrames++;
 	}
 
 	/** Welk bouwblok staat in DIT frame voor het eerst echt in de wereld van de client? Verschil met het plan = vertraging. */
@@ -433,7 +564,13 @@ public final class Director {
 		o.addProperty("camLifted", Camera.camLifted);
 		if (rec != null) { o.addProperty("resizes", rec.resizes); o.addProperty("writeMs", rec.writeNs / 1e6); o.addProperty("copyMs", rec.copyNs / 1e6); }
 		o.addProperty("holdBusy", holdBusy); o.addProperty("holdSections", holdSections);
+		o.addProperty("unsettledFrames", unsettledFrames); o.addProperty("serverLateFrames", serverLateFrames);
+		o.addProperty("maxServerLag", maxServerLag);
+		o.addProperty("holdServer", holdServer); o.addProperty("holdVisible", holdVisible);
+		o.addProperty("waitReason", waitReason);
 		o.addProperty("gameFps", Minecraft.getInstance().getFps());
+		o.addProperty("etaSec", busy() ? Tijdschatting.resterend(frame, totalFrames) : -1);
+		o.addProperty("elapsedSec", busy() ? Tijdschatting.verstreken() : 0);
 		return o;
 	}
 }

@@ -43,6 +43,8 @@ public final class Recorder {
 	private final Map<Integer, ByteBuffer> ready = new HashMap<>();
 	private final ConcurrentLinkedQueue<ByteBuffer> pool = new ConcurrentLinkedQueue<>();
 	private final AtomicInteger inFlight = new AtomicInteger();
+	/** Hoeveel frames er al bij de GPU aangevraagd zijn (index van het volgende + 1). */
+	private final AtomicInteger requested = new AtomicInteger();
 	private volatile int endAt = -1;
 	private volatile String error;
 	private int oldW, oldH;
@@ -120,6 +122,7 @@ public final class Recorder {
 		GpuTexture tex = Minecraft.getInstance().gameRenderer.mainRenderTarget().getColorTexture();
 		if (tex == null || tex.getFormat().blockSize() != 4) { error = "onverwacht beeldformaat van de game"; return; }
 		inFlight.incrementAndGet();
+		requested.set(Math.max(requested.get(), idx + 1));
 		GpuBuffer buf = RenderSystem.getDevice().createBuffer(() -> "Regisseur frame",
 				// CLIENT_STORAGE: buffer in gewoon geheugen. Zonder die hint kostte uitlezen 147 ms per frame (gemeten).
 				GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_HINT_CLIENT_STORAGE, (long) BYTES);
@@ -159,7 +162,10 @@ public final class Recorder {
 						if (endAt >= 0 && next >= endAt) return;
 						if (error != null) return;
 						ready.wait(250);
-						if ((waited += 250) > 20000) { error = "frame " + next + " kwam nooit terug van de GPU"; return; }
+						// Alleen een fout als het frame echt aangevraagd is en de GPU het niet teruggeeft. Is het nog niet
+						// aangevraagd (de regisseur wacht tot de wereld klaar is), dan gewoon blijven wachten.
+						if (next >= requested.get()) { waited = 0; continue; }
+						if ((waited += 250) > 60000) { error = "frame " + next + " kwam nooit terug van de GPU"; return; }
 					}
 				}
 				long w0 = System.nanoTime();

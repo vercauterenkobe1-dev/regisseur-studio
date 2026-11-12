@@ -73,6 +73,9 @@ final class ShowReport {
 			JsonObject meas = new JsonObject();
 			meas.addProperty("camInBlock", Camera.camInBlock);
 			meas.addProperty("camLifted", Camera.camLifted);
+			meas.addProperty("unsettledFrames", Director.unsettledFrames);
+			meas.addProperty("serverLateFrames", Director.serverLateFrames);
+			meas.addProperty("maxServerLag", Director.maxServerLag);
 			JsonArray lag = new JsonArray();
 			for (int v : landLag) lag.add(v);
 			meas.add("landLagFrames", lag);

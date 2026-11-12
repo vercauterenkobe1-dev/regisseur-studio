@@ -5,6 +5,9 @@ terraform, een bouwwerk dat blok per blok verschijnt, filmische camerashots, een
 Minecraft-geluiden en muziek die op het ritme van de bouw gemonteerd is. Alles wordt frame-exact opgenomen
 in 1080x1920, 60 fps, en afgewerkt tot een MP4 die overal afspeelt.
 
+**Meewerken?** Lees [CONTRIBUTING.md](CONTRIBUTING.md) (installeren, bouwen, testen, wijziging indienen) en
+[studio/WEGWIJZER.md](studio/WEGWIJZER.md) (welk bestand doet wat).
+
 ## Wat zit waar
 
 | Map | Inhoud |

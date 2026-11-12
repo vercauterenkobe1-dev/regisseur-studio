@@ -14,7 +14,7 @@ Criteria (vastgelegd VOOR het bouwen van de muzieksynchronisatie, niet aanpassen
   R5 camera    : 0 frames waarin het oog in een blok of in water zat
   R6 shots     : minstens 4 verschillende shots als er een bouwwerk is (behalve in de stijl "één camera")
 """
-import json, sys
+import json, os, re, subprocess, sys
 
 
 def near(t, grid, tol):
@@ -76,6 +76,44 @@ def dynamics(s, fps):
         out.append(("D3 puls op de tel", r >= 1.3, f"tempo na/voor de tel: {r:.2f} over {len(beats)} tellen (min 1.30)"))
     else:
         out.append(("D3 puls op de tel", None, "geen bouw of geen muziek"))
+    return out
+
+
+def glitches(s, fps, take):
+    """G1 wereld klaar : 0 frames opgenomen terwijl chunks nog niet opnieuw getekend waren of de server achterliep.
+    G2 geen flitsen  : 0 frames die sterk afwijken van zowel het frame ervoor als erna (behalve op cuts)."""
+    out = []
+    m = s.get("measured") or {}
+    if "unsettledFrames" in m:
+        u, l = m["unsettledFrames"], m["serverLateFrames"]
+        out.append(("G1 wereld klaar", u == 0 and l == 0,
+                    f"{u} frames met onafgewerkte chunks, {l} frames met achterlopende server (max {m.get('maxServerLag')} frames)"))
+    else:
+        out.append(("G1 wereld klaar", False, "geen glitch-metingen in show.json"))
+    if not os.path.exists(take):
+        out.append(("G2 geen flitsen", None, "take.mp4 niet gevonden"))
+        return out
+    # verschil tussen opeenvolgende frames (kleine versie, grijs), gemiddeld per frame
+    p = subprocess.run(["ffmpeg", "-hide_banner", "-i", take, "-vf",
+                        "scale=270:480,format=gray,tblend=all_mode=difference,signalstats,metadata=print:key=lavfi.signalstats.YAVG",
+                        "-f", "null", "-"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    d = [float(x) for x in re.findall(r"lavfi\.signalstats\.YAVG=([\d.]+)", p.stderr)]
+    if len(d) < 30:
+        out.append(("G2 geen flitsen", False, "meting mislukt"))
+        return out
+    cuts = [round(x["start"] * fps) for x in s.get("shots", [])[1:]]
+    events = []
+    for i in range(1, len(d) - 1):
+        f = i + 1  # d[i] = verschil tussen frame i en i+1
+        if any(abs(f - c) <= 2 for c in cuts):
+            continue
+        w = sorted(d[max(0, i - 15): i - 1] + d[i + 2: i + 17])
+        med = w[len(w) // 2] if w else 0
+        # een flits: groot verschil heen EN terug, telkens veel groter dan de omgeving
+        if d[i] > max(2.0, 4 * med) and d[i + 1] > max(2.0, 4 * med):
+            events.append(round(f / fps, 2))
+    out.append(("G2 geen flitsen", not events, f"{len(events)} flitsen" + (f" op {events[:8]} s" if events else "")
+                + f" (over {len(d)} frames)"))
     return out
 
 
@@ -150,6 +188,7 @@ def main():
     else:
         res.append(("R6 shots", None, "geen bouwwerk"))
     res += dynamics(s, fps)
+    res += glitches(s, fps, os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])), "take.mp4"))
     allok = True
     for k, ok, msg in res:
         allok &= ok is not False

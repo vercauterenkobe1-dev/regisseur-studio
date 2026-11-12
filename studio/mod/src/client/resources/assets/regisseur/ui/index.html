@@ -67,6 +67,7 @@
       <div style="grid-column: span 2"><label>Bouwstijl</label><select id="bstyle"><option value="place">Zoals een speler: blok per blok op zijn plek</option><option value="fly">Invliegen: blokken vliegen naar hun plek</option></select></div>
       <div style="grid-column: span 2"><label>Materiaalteller</label><select id="counter"><option value="mined">Gemijnde blokken: tellen mee tijdens de terraform</option><option value="placed">Geplaatste blokken: tellen mee tijdens de bouw</option><option value="off">Uit</option></select></div>
       <div style="grid-column: span 2"><label>Geluidseffecten</label><select id="sfx"><option value="on">Aan: echte Minecraft-geluiden bij graven, bouwen en vuurwerk</option><option value="off">Uit: alleen muziek</option></select></div>
+      <div style="grid-column: span 2"><label>Eindbeeld</label><select id="endcard"><option value="subscribe">Rode SUBSCRIBE-knop de laatste 3 seconden</option><option value="off">Geen</option></select></div>
       <div style="grid-column: span 2"><label>Opening (hook)</label><select id="hteaser"><option value="on">Teaser: open met het eindresultaat, cut naar het begin (beste kijkersbehoud, loopt naadloos rond)</option><option value="off">Gewoon: begin bij het lege landschap</option></select></div>
       <div style="grid-column: span 2"><label>Hooktekst (Engels; {mined} en {placed} worden de echte aantallen)</label><input id="htext" type="text" placeholder="I mined {mined} blocks for this"></div>
       <div><label>Diepte gat / groef</label><input type="number" id="tdepth" min="6" max="60"></div>
@@ -135,6 +136,7 @@
     </div>
     <div id="bar"><i></i></div>
     <div id="phase">Klaar om te starten</div>
+    <div id="eta" style="font-size:15px; margin-top:4px"></div>
     <div id="msg"></div>
     <button id="stop" style="margin-top:10px; display:none">Stop opname</button>
     <video id="vid" controls playsinline style="display:none"></video>
@@ -166,7 +168,7 @@ const NUM = { intro:['timing','intro'], terraform:['timing','terraform'], build:
   tdepth:['terraform','depth'], tlength:['terraform','length'] };
 const TXT = { time:['world','time'], weather:['world','weather'], highlight:['style','highlight'],
   style:['camera','style'], transition:['camera','transition'], sync:['music','sync'], tstyle:['terraform','style'],
-  bstyle:['build','style'], counter:['overlay','counter'], hteaser:['hook','teaser'], htext:['hook','text'], sfx:['sound','sfx'] };
+  bstyle:['build','style'], counter:['overlay','counter'], hteaser:['hook','teaser'], htext:['hook','text'], sfx:['sound','sfx'], endcard:['endcard','mode'] };
 
 function fill(sel, items, cur, empty) {
   sel.innerHTML = '';
@@ -195,6 +197,7 @@ function show() {
   if (!$('counter').value) $('counter').value = 'mined';
   if (!$('hteaser').value) $('hteaser').value = 'on';
   if (!$('sfx').value) $('sfx').value = 'on';
+  if (!$('endcard').value) $('endcard').value = 'subscribe';
   if (!$('tdepth').value) $('tdepth').value = 24;
   if (!$('tlength').value) $('tlength').value = 2.5;
   drawCaps(); drawTimeline();
@@ -267,6 +270,17 @@ function dropzone(el, input, btn, kind) {
 
 const PHASES = { IDLE:'Klaar om te starten', PREPARING:'Draaiboek berekenen…', RECORDING:'Opnemen', FINISHING:'Opname afsluiten…', RENDERING:'Captions, muziek en eindrender…', DONE:'Klaar ✔', ERROR:'Fout' };
 
+/** 75 -> "1 min 15 s", 3700 -> "1 u 2 min" */
+function fmtDur(sec) {
+  if (sec < 60) return Math.max(1, Math.round(sec)) + ' s';
+  const m = Math.round(sec / 60);
+  return m < 60 ? m + ' min' : Math.floor(m / 60) + ' u ' + (m % 60) + ' min';
+}
+/** Kloktijd binnen sec seconden, bv. "16:42". */
+function klokOver(sec) {
+  return new Date(Date.now() + sec * 1000).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
+}
+
 async function poll() {
   try {
     const p = await api('/ping');
@@ -275,8 +289,11 @@ async function poll() {
     const busy = ['PREPARING','RECORDING','FINISHING','RENDERING'].includes(s.phase);
     $('go').disabled = busy || !p.inWorld || !p.singleplayer;
     $('stop').style.display = s.phase === 'RECORDING' ? '' : 'none';
-    const pct = s.phase === 'RECORDING' && s.totalFrames ? s.frame / s.totalFrames * 100 : (s.phase === 'DONE' ? 100 : (busy ? 100 : 0));
+    // voortgangsbalk over het hele traject (opnemen + afwerken + controleren), op basis van de tijdschatting
+    const eta = s.etaSec, done = s.elapsedSec;
+    const pct = s.phase === 'DONE' ? 100 : (busy && eta >= 0 ? done / (done + eta) * 100 : (busy ? 3 : 0));
     document.querySelector('#bar i').style.width = pct + '%';
+    $('eta').innerHTML = busy ? (eta >= 0 ? `Nog ongeveer <b>${fmtDur(eta)}</b> · klaar rond <b>${klokOver(eta)}</b>` : 'Tijd inschatten…') : '';
     $('phase').textContent = PHASES[s.phase] + (s.phase === 'RECORDING' ? ` · ${s.frame}/${s.totalFrames} frames · ${s.fps.toFixed(0)} fps` : '');
     $('phase').className = s.phase === 'ERROR' ? 'fail' : (s.phase === 'DONE' ? 'pass' : '');
     $('msg').textContent = s.message;

@@ -99,6 +99,48 @@ def build_ass(captions, style, path):
         f.write("\n".join(lines) + "\n")
 
 
+# ---------------------------------------------------------------- subscribe-eindbeeld
+
+def rounded_rect(w, h, r):
+    """ASS-tekenpad (p1-modus) voor een afgeronde rechthoek, gecentreerd rond (0,0)."""
+    k = 0.5523 * r  # bezier-benadering van een kwartcirkel
+    x0, y0, x1, y1 = 0, 0, w, h  # libass centreert een tekening met an5 zelf op haar omhullende
+    pts = [f"m {x0 + r:.0f} {y0:.0f}", f"l {x1 - r:.0f} {y0:.0f}",
+           f"b {x1 - r + k:.0f} {y0:.0f} {x1:.0f} {y0 + r - k:.0f} {x1:.0f} {y0 + r:.0f}", f"l {x1:.0f} {y1 - r:.0f}",
+           f"b {x1:.0f} {y1 - r + k:.0f} {x1 - r + k:.0f} {y1:.0f} {x1 - r:.0f} {y1:.0f}", f"l {x0 + r:.0f} {y1:.0f}",
+           f"b {x0 + r - k:.0f} {y1:.0f} {x0:.0f} {y1 - r + k:.0f} {x0:.0f} {y1 - r:.0f}", f"l {x0:.0f} {y0 + r:.0f}",
+           f"b {x0:.0f} {y0 + r - k:.0f} {x0 + r - k:.0f} {y0:.0f} {x0 + r:.0f} {y0:.0f}"]
+    return " ".join(pts)
+
+
+def build_endcard(total, card, path):
+    """Rode YouTube-subscribeknop de laatste N seconden: popt binnen, klopt een keer, blijft staan tot het einde.
+    card = {"text": "SUBSCRIBE", "dur": 3, "y": 1300}"""
+    dur = float(card.get("dur", 3))
+    t0, t1 = max(0.0, total - dur), total
+    y = int(card.get("y", 1300))
+    text = card.get("text", "SUBSCRIBE").upper()
+    w, h = 40 + 62 * len(text), 150
+    pop = r"\fscx30\fscy30\t(0,170,\fscx112\fscy112)\t(170,300,\fscx100\fscy100)"
+    pulse = r"\t(1400,1550,\fscx106\fscy106)\t(1550,1750,\fscx100\fscy100)"
+    pos = rf"\an5\pos(540,{y})"
+    lines = [
+        "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {W}", f"PlayResY: {H}", "ScaledBorderAndShadow: yes", "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic,"
+        " Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment,"
+        " MarginL, MarginR, MarginV, Encoding",
+        # knop: YouTube-rood (#FF0000, in ASS BGR) met zachte schaduw; tekst: wit, vet
+        "Style: Box,Arial,20,&H000000FF&,&H000000FF&,&H00000000&,&H70000000&,0,0,0,0,100,100,0,0,1,0,6,5,0,0,0,1",
+        "Style: Txt,Arial Black,84,&H00FFFFFF&,&H00FFFFFF&,&H00000000&,&H00000000&,-1,0,0,0,100,100,2,0,1,0,0,5,0,0,0,1",
+        "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+        rf"Dialogue: 3,{ass_time(t0)},{ass_time(t1)},Box,,0,0,0,,{{{pos}\fad(120,0){pop}{pulse}\p1}}{rounded_rect(w, h, 34)}",
+        rf"Dialogue: 4,{ass_time(t0)},{ass_time(t1)},Txt,,0,0,0,,{{{pos}\fad(120,0){pop}{pulse}}}{text}",
+    ]
+    with open(path, "w", encoding="utf-8-sig") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 # ---------------------------------------------------------------- video
 
 def segment(i, clip, wd):
@@ -141,7 +183,8 @@ def build_master(sb, wd, ass, counter=None):
         fc.append(f"{prev}[{len(segs)}:v]overlay=0:0:format=auto,ass={cass}[cnt]")
         prev = "[cnt]"
     caps = f"ass={ass}" if ass else "null"
-    fc.append(f"{prev}{caps},format=yuv420p[v]")
+    end = ",ass=endcard.ass" if os.path.exists(os.path.join(wd, "endcard.ass")) else ""  # subscribe-eindbeeld bovenop
+    fc.append(f"{prev}{caps}{end},format=yuv420p[v]")
     sh(["ffmpeg", "-hide_banner", "-y", *inputs, "-filter_complex", ";".join(fc), "-map", "[v]",
         "-r", str(FPS), "-fps_mode", "cfr", *LOSSLESS, "master.mkv"], wd)
     return total
@@ -248,6 +291,8 @@ def main():
         ass = "captions.ass"
         build_ass(sb["captions"], sb.get("style", {}), os.path.join(wd, ass))
     counter, counter_ends = make_counter(sb, teaser, shift)                  # 3. teller
+    if sb.get("endcard"):                                                    #    + subscribe-eindbeeld
+        build_endcard(sum(c["dur"] for c in sb["clips"]), sb["endcard"], os.path.join(wd, "endcard.ass"))
     total = build_master(sb, wd, ass, counter)                               # 4. beeld
     print(f"master.mkv klaar ({total:.2f} s)")
     audio = ["-i", master_audio(sb, total, wd, teaser, counter_ends)] if sb.get("music") else []   # 5. geluid

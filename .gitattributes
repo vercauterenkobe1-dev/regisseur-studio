@@ -1,0 +1,9 @@
+# Regeleinden gelijk voor iedereen (Windows, Mac, Linux)
+* text=auto
+*.bat eol=crlf
+*.ps1 eol=crlf
+gradlew eol=lf
+*.jar binary
+*.nbt binary
+*.schem binary
+*.png binary

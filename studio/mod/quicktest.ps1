@@ -11,6 +11,8 @@ Start-Process -FilePath "$PSScriptRoot\gradlew.bat" -ArgumentList "runClient", "
 $r = $null; $deadline = (Get-Date).AddMinutes(9)
 while ((Get-Date) -lt $deadline) { try { $r = Invoke-RestMethod "$u/ping" -TimeoutSec 3; if ($r.inWorld) { break } } catch {}; Start-Sleep -Seconds 5 }
 if (-not $r.inWorld) { "testgame niet klaar"; exit 1 }
+# onthoud WELKE testgame dit script gestart heeft: alleen die sluiten we straks af (niet die van een ander script)
+$mine = Get-CimInstance Win32_Process -Filter "Name='java.exe'" | Where-Object { $_.CommandLine -match 'regisseur\.port=47801' } | Select-Object -ExpandProperty ProcessId
 "testgame $($r.version)"
 $p = Invoke-RestMethod "$u/api/project"
 $p.schematic = $Schem; $p.timing.intro = 1.5; $p.timing.terraform = $Terra; $p.timing.build = $Build; $p.timing.outro = 3
@@ -38,4 +40,4 @@ for ($i = 0; $i -lt $n; $i++) { $t = [math]::Round(0.3 + ($total - 0.6) * $i / (
 $in = (0..($n - 1) | ForEach-Object { "-i"; "$fr\s_$_.png" })
 ffmpeg -hide_banner -loglevel error -y @in -filter_complex "hstack=inputs=$n" "$fr\$Sheet.png"
 "beeldstrook: $fr\$Sheet.png (tijden 0,3 s tot $([math]::Round($total-0.3,1)) s)"
-Get-CimInstance Win32_Process -Filter "Name='java.exe'" | Where-Object { $_.CommandLine -match 'regisseur\.port=47801' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -Confirm:$false }
+foreach ($id in $mine) { Stop-Process -Id $id -Force -Confirm:$false -ErrorAction SilentlyContinue }

@@ -1,7 +1,9 @@
 package be.studio.regisseur.draaiboek;
 
+import be.studio.regisseur.mixin.ChunkCacheInvoker;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.util.profiling.Profiler;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -94,7 +96,7 @@ public final class ShowPlan {
 		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 		p.y0 = Terrein.groundY(level, cx, cz, pos);
 		{ // staat het midden in het water, dan bouwen we een eiland op waterhoogte in plaats van op de bodem
-			int w = Terrein.waterY(level, cx, cz, level.getHeight(Heightmap.Types.WORLD_SURFACE, cx, cz) - 1, p.y0, pos);
+			int w = Terrein.waterY(level, cx, cz, Terrein.surfaceY(level, cx, cz), p.y0, pos);
 			if (w > p.y0) p.y0 = w;
 		}
 
@@ -103,7 +105,10 @@ public final class ShowPlan {
 		else if (quarry != null) GroefTerraform.maak(p, level, sch, quarry, margin, radiusNoSchematic, tIntro, tTerra, distMul, sync);
 		else VlakTerraform.maak(p, level, tIntro, tTerra, distMul, sync);
 
-		// 2. het bouwwerk
+		// 2. het bouwwerk (past het wel onder de bouwlimiet? anders wordt de top afgeknipt)
+		if (sch != null && p.y0 + 1 + sch.sy > level.getMaxY())
+			throw new IllegalStateException("het bouwwerk is " + sch.sy + " blokken hoog en past hier niet onder de bouwlimiet (y "
+					+ level.getMaxY() + "); kies een plek die lager ligt (grond hoogstens y " + (level.getMaxY() - 1 - sch.sy) + ")");
 		if (sch != null) Bouwvolgorde.plan(p, sch, tIntro, tTerra, tBuild, sync);
 
 		p.ops.sort((a, b) -> Float.compare(a.t, b.t));
@@ -132,6 +137,8 @@ public final class ShowPlan {
 			if (o.fx == 2)
 				level.sendParticles(ParticleTypes.WAX_OFF, true, true, o.x + 0.5, o.y + 0.6, o.z + 0.5, 4, 0.35, 0.35, 0.35, 0.0);
 		}
+		// meteen doorsturen, niet wachten op de volgende server-tick (die kan tijdens de opname 0,5 s ver liggen)
+		((ChunkCacheInvoker) level.getChunkSource()).regisseur$broadcastChangedChunks(Profiler.get());
 	}
 
 	/** Deeltjes tijdens de terraform, passend bij de stijl. t = videotijd, u = 0..1 voortgang van de terraform. */

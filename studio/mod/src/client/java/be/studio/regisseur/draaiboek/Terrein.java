@@ -43,13 +43,19 @@ public final class Terrein {
 
 	/** Hoogte van de echte grond in deze kolom (bomen en water tellen niet). */
 	public static int groundY(ServerLevel level, int x, int z, BlockPos.MutableBlockPos p) {
-		int y = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1, min = level.getMinY();
+		int y = surfaceY(level, x, z), min = level.getMinY();
 		while (y > min && !ground(level.getBlockState(p.set(x, y, z)))) y--;
 		return y;
 	}
 
-	/** Bovenste blok van de kolom (alles telt mee, ook bomen). */
+	/**
+	 * Bovenste blok van de kolom (alles telt mee, ook bomen).
+	 * LET OP: Minecraft antwoordt voor een stuk wereld dat niet ingeladen is "helemaal onderaan" in plaats van het
+	 * in te laden. Bij grote bouwwerken (kathedraal) gaf dat een put tot op de bodem en bos dat bleef staan.
+	 * Daarom laden we het stuk eerst echt in (of maken het aan, als het nog nooit bezocht is).
+	 */
 	public static int surfaceY(ServerLevel level, int x, int z) {
+		level.getChunk(x >> 4, z >> 4); // inladen/aanmaken; daarna klopt de hoogtekaart
 		return level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1;
 	}
 

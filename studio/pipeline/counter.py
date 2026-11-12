@@ -93,13 +93,20 @@ def _slot(i, rows):
 
 
 def fmt(n):
-    return f"{n:,}"
+    """Tot 99,999 exact met komma; daarboven kort (584.2K, 1.95M), anders worden de cijfers te klein."""
+    if n < 100_000:
+        return f"{n:,}"
+    if n < 1_000_000:
+        return f"{n / 1000:.1f}K"
+    return f"{n / 1_000_000:.2f}M"
 
 
 def font_size(longest):
-    """Eén lettergrootte voor alle getallen; het langste getal past in NUM_W (Arial Black, schuin)."""
-    s = fmt(longest)
-    em = sum(0.36 if ch == "," else 0.68 for ch in s)
+    """Eén lettergrootte voor alle getallen: de breedste tekst die een teller ooit toont, past in NUM_W.
+    (Een teller die tot 1.95M loopt, toont onderweg ook "99,999": dat is breder.)"""
+    shown = [fmt(longest)] + (["99,999"] if longest >= 99_999 else []) + (["999.9K"] if longest >= 999_900 else [])
+    width = {",": 0.36, ".": 0.36, "M": 0.92, "K": 0.80}
+    em = max(sum(width.get(ch, 0.68) for ch in s) for s in shown)
     return max(40, min(MAX_FS, int(NUM_W / em)))
 
 

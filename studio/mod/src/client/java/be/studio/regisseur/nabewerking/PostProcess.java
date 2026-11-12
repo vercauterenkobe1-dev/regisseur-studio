@@ -4,6 +4,7 @@ import be.studio.regisseur.RegisseurClient;
 import be.studio.regisseur.Studio;
 import be.studio.regisseur.draaiboek.ShowPlan;
 import be.studio.regisseur.show.Director;
+import be.studio.regisseur.show.Tijdschatting;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -57,6 +58,7 @@ public final class PostProcess {
 
 	/** Op de achtergrond: eindrender en controles. */
 	public static void run(JsonObject project, Path dir, float seconds) throws Exception {
+		Tijdschatting.naar(Tijdschatting.Stap.AFWERKEN);
 		Director.phase = Director.Phase.RENDERING;
 		Director.message = "captions, muziek en eindencode";
 		Path pipeline = Path.of(Studio.cfg("pipeline", Studio.base().resolve("pipeline").toString()));
@@ -95,6 +97,14 @@ public final class PostProcess {
 		if (Files.exists(dir.resolve("counter.json"))) sb.addProperty("counter", "counter.json");
 		if (Files.exists(dir.resolve("sfx.json"))) sb.addProperty("sfx", "sfx.json");
 		if (Files.exists(dir.resolve("show.json"))) sb.addProperty("show", "show.json");
+		// eindbeeld: rode subscribeknop de laatste 3 seconden (standaard aan)
+		JsonObject endcard = Studio.obj(project, "endcard");
+		if (!"off".equals(Studio.str(endcard, "mode", "subscribe")) && seconds > 8) {
+			JsonObject ec = new JsonObject();
+			ec.addProperty("text", Studio.str(endcard, "text", "SUBSCRIBE"));
+			ec.addProperty("dur", Studio.num(endcard, "dur", 3));
+			sb.add("endcard", ec);
+		}
 		// eerste frames: shader-belichting en chunks komen nog op gang; weg ermee (muziek schuift mee)
 		if (seconds > 6) sb.addProperty("lead_trim", 0.4);
 		// Hook: de video opent met het eindresultaat (1 maat), met een hooktekst; daarna begint het verhaal.
@@ -139,6 +149,7 @@ public final class PostProcess {
 			}
 		}
 		Director.message = "kwaliteit meten";
+		Tijdschatting.naar(Tijdschatting.Stap.CONTROLEREN);
 		java.util.ArrayList<String> j = new java.util.ArrayList<>(List.of(python, pipeline.resolve("judge.py").toString(),
 				fin.toString(), "--master", dir.resolve("master.mkv").toString()));
 		if (Files.exists(dir.resolve("captions.ass"))) { j.add("--captions"); j.add(dir.resolve("captions.ass").toString()); }
@@ -160,6 +171,7 @@ public final class PostProcess {
 		Files.deleteIfExists(dir.resolve("master.mkv")); // lossless tussenbestand is groot
 		for (int i = 0; i < 9; i++) Files.deleteIfExists(dir.resolve(String.format("seg%02d.mkv", i)));
 		Director.phase = Director.Phase.DONE;
+		Tijdschatting.klaar();
 		Director.message = hasMusic ? "klaar" : "klaar (zonder muziek: kies een track voor geluid)";
 	}
 

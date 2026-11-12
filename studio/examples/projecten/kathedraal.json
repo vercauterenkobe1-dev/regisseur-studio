@@ -1,0 +1,24 @@
+{
+  "name": "Kathedraal",
+  "schematic": "kathedraal.schem",
+  "timing": { "intro": 2, "terraform": 9, "build": 22, "outro": 5 },
+  "camera": { "orbitSpeed": 10, "fov": 70, "distance": 0.7, "style": "shots", "transition": "auto" },
+  "site": { "margin": 3, "radius": 12 },
+  "world": { "time": "1000", "weather": "clear" },
+  "music": { "file": "Regisseur Beat.wav", "in": 0, "sync": "true" },
+  "terraform": { "style": "square", "depth": 16, "length": 2.5 },
+  "build": { "style": "place" },
+  "overlay": { "counter": "mined" },
+  "sound": { "sfx": "on" },
+  "hook": { "teaser": "on", "text": "I mined {mined} blocks for this" },
+  "endcard": { "mode": "subscribe", "text": "SUBSCRIBE", "dur": 3 },
+  "captions": [
+    { "start": 0.5, "end": 1.8, "text": "Watch this spot" },
+    { "start": 3.0, "end": 5.6, "text": "Digging the foundation" },
+    { "start": 11.4, "end": 14.0, "text": "546,094 blocks" },
+    { "start": 20.0, "end": 22.6, "text": "Block by block" },
+    { "start": 28.0, "end": 30.6, "text": "Almost there..." },
+    { "start": 33.9, "end": 36.2, "text": "Would you build this?" }
+  ],
+  "style": { "font": "Arial Black", "size": 92, "highlight": "FFE600", "y": 1180, "words_per_chunk": 3 }
+}
