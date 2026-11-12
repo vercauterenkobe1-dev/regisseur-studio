@@ -270,3 +270,23 @@ Overzicht voor de gebruiker: `WEGWIJZER.md`. Oude namen in de notities hierboven
 - `treeish/ground/fluid/waterY/groundY/smoothRing/interp` -> `Terrein` (+ `Terrein.zichtlijn` voor vierkant en groef)
 - Director roept nu `plan.terraformFx(level, t, u)` aan in plaats van per stijl.
 - `render.py main()` = 6 benoemde stappen: `plan_timeline`, captions, `make_counter`, `build_master`, `master_audio`, eindencode.
+## Sessie 9: grote bouwwerken, kathedraal, GitHub (0.10.0)
+- Repository (openbaar): https://github.com/vercauterenkobe1-dev/regisseur-studio (account vercauterenkobe1-dev, commits met
+  noreply-adres). Meewerkers: `CONTRIBUTING.md`. gh-login: device-code pas goedkeuren NA Enter in de terminal, anders verloopt hij.
+- Geen glitches: `Director.frameStart` wacht tot (1) server klaar met vorige blokken, (2) steekproeven en bouwblokken echt bij de
+  client staan (`visibleNow`; niet-ingeladen chunks overslaan), (3) alle chunks hertekend; max 240 render-frames per videoframe.
+  `ChunkCacheInvoker` stuurt blokwijzigingen meteen door (niet wachten op een server-tick). `landLeadFrames` 1 in dev-config.
+  Tellers in show.json/status: unsettledFrames, serverLateFrames (regel G1), G2 = flitsdetector op take.mp4.
+- FOUT GEVONDEN: `level.getHeight` geeft voor NIET-ingeladen chunks minY terug. Gaf bij de kathedraal een put tot de bodem
+  (7,5 M ops) en bos dat bleef staan. `Terrein.surfaceY` laadt nu eerst de chunk (`level.getChunk`).
+- Landschap rondom moet VOORAF bestaan, anders lege (lichtblauwe) vlakken in de verte: `show/Landschap.maakAan` (32 chunks per
+  server-taak). Nog traag (sequentieel, ~3 chunks/s; kathedraal ~12.500 chunks): volgende stap `getChunkFuture` parallel.
+- `maxRenderDistance` (config, standaard 16, kathedraal 32); opwarmen schaalt mee; frame 0 wacht op bouwterrein + landschap.
+- Venster sluiten tijdens opname/nabewerking wordt genegeerd (`WindowCloseMixin` + `CloseWatchdogMixin`); de testgame
+  (poort 47801) sluit nooit via het venster. De gebruiker klikte de testgame meermaals dicht.
+- Recorder: "kwam nooit terug van de GPU" was vals alarm bij trage opnames (wachtte op een frame dat nog niet aangevraagd was).
+- Nieuw: rood SUBSCRIBE-eindbeeld (`render.py build_endcard`, project `endcard`), tijdsinschatting (`show/Tijdschatting`,
+  leert in `studio/tijden.json`), teller K/M-notatie vanaf 100.000, `pipeline/schem_trim.py` (ondergrond en rommel van
+  downloads weg), `mod/maakvideo.ps1` (opname met projectbestand -> bureaublad), hoogtecontrole tegen de bouwlimiet.
+- Kathedraal (546.094 blokken, 240x225x152): nog GEEN goede video. Proefversie op het bureaublad heeft lege verte en geen
+  kathedraal in teaser/slotshot. Open: landschap sneller aanmaken, of camera dichter + zichtafstand 16.
