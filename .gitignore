@@ -1,0 +1,29 @@
+# Video's en tussenbestanden (groot, horen niet in git)
+Exports/
+work/
+*.mp4
+*.mkv
+*.mov
+*.wav
+*.m4a
+*.mp3
+*.ogg
+
+# Gradle / build
+studio/mod/.gradle/
+studio/mod/build/
+.gradle/
+build/
+
+# Dev-testgame: wereld, mods, shaderpacks, renders, logs
+studio/mod/run/
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

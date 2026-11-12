@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Regisseur Studio</title>
+<style>
+  :root { --bg:#0f1115; --panel:#181b22; --line:#2a2f3a; --text:#e8eaf0; --dim:#9aa3b5; --acc:#ffe600; --ok:#4ade80; --bad:#f87171; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 "Segoe UI",system-ui,sans-serif; }
+  header { display:flex; align-items:center; gap:14px; padding:14px 22px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; }
+  header h1 { font-size:18px; margin:0; letter-spacing:.3px; }
+  header h1 span { color:var(--acc); }
+  #conn { margin-left:auto; font-size:13px; color:var(--dim); }
+  #conn b { color:var(--ok); } #conn b.off { color:var(--bad); }
+  main { display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:18px; padding:18px 22px 60px; max-width:1280px; margin:0 auto; }
+  @media (max-width:980px){ main{ grid-template-columns:1fr; } }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:16px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:1.2px; color:var(--dim); margin:0 0 12px; }
+  label { display:block; font-size:13px; color:var(--dim); margin:10px 0 4px; }
+  input[type=text], input[type=number], select { width:100%; background:#0f1218; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit; }
+  input:focus, select:focus { outline:1px solid var(--acc); }
+  .row { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  button { background:#232834; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 14px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--dim); }
+  button.go { background:var(--acc); color:#111; border:0; font-weight:700; font-size:16px; padding:13px 18px; width:100%; }
+  button.go:disabled { opacity:.45; cursor:not-allowed; }
+  button.x { padding:4px 9px; color:var(--dim); }
+  .drop { border:1.5px dashed var(--line); border-radius:10px; padding:12px; text-align:center; color:var(--dim); font-size:13px; margin-top:10px; }
+  .drop.over { border-color:var(--acc); color:var(--text); }
+  .cap { display:grid; grid-template-columns:72px 72px 1fr 34px; gap:8px; margin-bottom:8px; }
+  .timeline { position:relative; height:34px; border-radius:8px; overflow:hidden; display:flex; margin-top:12px; font-size:12px; }
+  .timeline div { display:flex; align-items:center; justify-content:center; color:#111; font-weight:600; white-space:nowrap; overflow:hidden; }
+  .capbar { position:relative; height:10px; margin-top:5px; background:#0f1218; border-radius:5px; }
+  .capbar i { position:absolute; top:0; height:10px; background:var(--acc); border-radius:5px; opacity:.85; }
+  .hint { font-size:12.5px; color:var(--dim); margin-top:8px; }
+  #bar { height:10px; background:#0f1218; border-radius:6px; overflow:hidden; margin:12px 0 6px; }
+  #bar i { display:block; height:100%; width:0; background:var(--acc); transition:width .25s; }
+  #phase { font-weight:600; } #msg { color:var(--dim); font-size:13px; min-height:20px; }
+  video { width:100%; border-radius:10px; background:#000; margin-top:12px; aspect-ratio:9/16; }
+  pre { background:#0f1218; border-radius:8px; padding:10px; font-size:12px; white-space:pre-wrap; margin:10px 0 0; }
+  .pass { color:var(--ok); } .fail { color:var(--bad); }
+  code { background:#0f1218; padding:1px 6px; border-radius:5px; font-size:12.5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 Regisseur <span>Studio</span></h1>
+  <div id="conn">verbinden…</div>
+</header>
+<main>
+<div>
+  <section>
+    <h2>1 · Bouwwerk</h2>
+    <label>Titel van de short</label>
+    <input type="text" id="name">
+    <label>Schematic (.schem, .litematic of .nbt)</label>
+    <select id="schematic"></select>
+    <div class="drop" id="dropS">Sleep hier een schematic-bestand naartoe, of <button id="pickS">kies bestand</button><input type="file" id="fileS" hidden accept=".schem,.litematic,.nbt"></div>
+    <div class="row2">
+      <div><label>Vrije rand rond het bouwwerk (blokken)</label><input type="number" id="margin" min="0" max="20"></div>
+      <div><label>Straal zonder schematic (blokken)</label><input type="number" id="radius" min="4" max="48"></div>
+    </div>
+    <div class="row">
+      <div style="grid-column: span 2"><label>Terraform-stijl</label><select id="tstyle"><option value="square">Vierkant: sleuf, uithollen, gras omhoog</option><option value="quarry">Uitgraven: diepe groef, vak per vak</option><option value="flatten">Vlakmaken: ronde vlakte</option></select></div>
+      <div style="grid-column: span 2"><label>Bouwstijl</label><select id="bstyle"><option value="place">Zoals een speler: blok per blok op zijn plek</option><option value="fly">Invliegen: blokken vliegen naar hun plek</option></select></div>
+      <div style="grid-column: span 2"><label>Materiaalteller</label><select id="counter"><option value="mined">Gemijnde blokken: tellen mee tijdens de terraform</option><option value="placed">Geplaatste blokken: tellen mee tijdens de bouw</option><option value="off">Uit</option></select></div>
+      <div style="grid-column: span 2"><label>Geluidseffecten</label><select id="sfx"><option value="on">Aan: echte Minecraft-geluiden bij graven, bouwen en vuurwerk</option><option value="off">Uit: alleen muziek</option></select></div>
+      <div style="grid-column: span 2"><label>Opening (hook)</label><select id="hteaser"><option value="on">Teaser: open met het eindresultaat, cut naar het begin (beste kijkersbehoud, loopt naadloos rond)</option><option value="off">Gewoon: begin bij het lege landschap</option></select></div>
+      <div style="grid-column: span 2"><label>Hooktekst (Engels; {mined} en {placed} worden de echte aantallen)</label><input id="htext" type="text" placeholder="I mined {mined} blocks for this"></div>
+      <div><label>Diepte gat / groef</label><input type="number" id="tdepth" min="6" max="60"></div>
+      <div><label>Lengte groef (×)</label><input type="number" id="tlength" step="0.5" min="1" max="5"></div>
+    </div>
+    <div class="hint">De bouwplaats is waar jij in de game staat op het moment dat je op opnemen drukt. Bij uitgraven loopt de groef in de richting waarin je kijkt, en komt het bouwwerk aan het verre einde. De camera begint achter je.</div>
+  </section>
+
+  <section>
+    <h2>2 · Timing en camera</h2>
+    <div class="row">
+      <div><label>Intro (s)</label><input type="number" id="intro" step="0.5" min="0"></div>
+      <div><label>Terraform (s)</label><input type="number" id="terraform" step="0.5" min="1"></div>
+      <div><label>Bouwen (s)</label><input type="number" id="build" step="0.5" min="1"></div>
+      <div><label>Outro (s)</label><input type="number" id="outro" step="0.5" min="0"></div>
+    </div>
+    <div class="timeline" id="tl"></div>
+    <div class="capbar" id="capbar"></div>
+    <div class="hint" id="total"></div>
+    <div class="row">
+      <div><label>Draaisnelheid (°/s)</label><input type="number" id="orbitSpeed" step="1"></div>
+      <div><label>Afstand (×)</label><input type="number" id="distance" step="0.05" min="0.4" max="3"></div>
+      <div><label>FOV</label><input type="number" id="fov" min="30" max="110"></div>
+      <div><label>Tijd in de wereld</label><select id="time"><option value="">laat staan</option><option value="1000">ochtend</option><option value="6000">middag</option><option value="11800">gouden uur</option><option value="12800">zonsondergang</option><option value="18000">nacht</option></select></div>
+    </div>
+    <div class="row2">
+      <div><label>Camerastijl</label><select id="style"><option value="shots">Regie: vijf shots (opening, kraan, draai, held, onthulling)</option><option value="orbit">Eén draaiende camera</option></select></div>
+      <div><label>Overgang tussen shots</label><select id="transition"><option value="auto">Automatisch (snijden op de maat bij muziek)</option><option value="cut">Altijd snijden</option><option value="smooth">Altijd vloeiend</option></select></div>
+    </div>
+    <label>Weer</label>
+    <select id="weather"><option value="">laat staan</option><option value="clear">helder</option><option value="rain">regen</option><option value="thunder">onweer</option></select>
+  </section>
+
+  <section>
+    <h2>3 · Muziek</h2>
+    <select id="music"></select>
+    <div class="drop" id="dropM">Sleep hier een muziekbestand naartoe (mp3, wav, m4a), of <button id="pickM">kies bestand</button><input type="file" id="fileM" hidden accept="audio/*"></div>
+    <div class="row2">
+      <div><label>Start in het nummer (s)</label><input type="number" id="musicIn" step="0.5" min="0"></div>
+      <div><label>Bouw op de maat van de muziek</label><select id="sync"><option value="true">Ja: delen en blokken vallen op de tel</option><option value="false">Nee</option></select></div>
+    </div>
+    <div class="hint">De muziek wordt automatisch gemasterd naar −14 LUFS (de YouTube-norm). Gebruik alleen muziek waar je de rechten voor hebt.</div>
+  </section>
+
+  <section>
+    <h2>4 · Captions</h2>
+    <div id="caps"></div>
+    <button id="addCap">+ caption</button>
+    <div class="row">
+      <div><label>Lettergrootte</label><input type="number" id="size" min="40" max="140"></div>
+      <div><label>Accentkleur</label><input type="text" id="highlight" maxlength="6"></div>
+      <div><label>Hoogte (y)</label><input type="number" id="y" min="300" max="1420"></div>
+      <div><label>Woorden per beeld</label><input type="number" id="wpc" min="1" max="5"></div>
+    </div>
+    <div class="hint">Elk woord licht op in de accentkleur. Vraag Claude om captions (in het Engels): die schrijft ze rechtstreeks in dit project en ze verschijnen hier na “Herladen”.</div>
+  </section>
+</div>
+
+<aside>
+  <section>
+    <h2>Opname</h2>
+    <button class="go" id="go">● Opnemen en renderen</button>
+    <div class="row2" style="margin-top:10px">
+      <button id="save">Opslaan</button>
+      <button id="reload">Herladen</button>
+    </div>
+    <div id="bar"><i></i></div>
+    <div id="phase">Klaar om te starten</div>
+    <div id="msg"></div>
+    <button id="stop" style="margin-top:10px; display:none">Stop opname</button>
+    <video id="vid" controls playsinline style="display:none"></video>
+    <pre id="judge" style="display:none"></pre>
+    <div class="hint" id="outpath"></div>
+  </section>
+  <section>
+    <h2>Zo werkt het</h2>
+    <div class="hint" style="margin-top:0">
+      1. Ga in de game op de plek staan waar je wilt bouwen en kijk naar het landschap.<br>
+      2. Druk hier op opnemen. De game schakelt naar 1080×1920 en de camera neemt het over.<br>
+      3. Blijf van muis en toetsenbord af tot de balk vol is. Het beeld in de game ziet er tijdens de opname uitgerekt uit: dat is normaal.<br>
+      4. De video verschijnt hieronder, samen met de kwaliteitsmeting.
+    </div>
+    <div class="hint" id="folder"></div>
+  </section>
+</aside>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const api = (p, opt) => fetch(p, opt).then(r => r.json());
+let project = null, lastPhase = '';
+
+const NUM = { intro:['timing','intro'], terraform:['timing','terraform'], build:['timing','build'], outro:['timing','outro'],
+  orbitSpeed:['camera','orbitSpeed'], distance:['camera','distance'], fov:['camera','fov'],
+  margin:['site','margin'], radius:['site','radius'], musicIn:['music','in'],
+  size:['style','size'], y:['style','y'], wpc:['style','words_per_chunk'],
+  tdepth:['terraform','depth'], tlength:['terraform','length'] };
+const TXT = { time:['world','time'], weather:['world','weather'], highlight:['style','highlight'],
+  style:['camera','style'], transition:['camera','transition'], sync:['music','sync'], tstyle:['terraform','style'],
+  bstyle:['build','style'], counter:['overlay','counter'], hteaser:['hook','teaser'], htext:['hook','text'], sfx:['sound','sfx'] };
+
+function fill(sel, items, cur, empty) {
+  sel.innerHTML = '';
+  sel.add(new Option(empty, ''));
+  for (const f of items) sel.add(new Option(f, f));
+  if (cur && !items.includes(cur)) sel.add(new Option(cur + ' (ontbreekt)', cur));
+  sel.value = cur || '';
+}
+
+async function loadFiles() {
+  const f = await api('/api/files');
+  fill($('schematic'), f.schematics, project?.schematic, 'geen (alleen terraform)');
+  fill($('music'), f.music, project?.music?.file, 'geen muziek');
+  $('folder').innerHTML = 'Bestanden staan in <code>' + f.folder + '</code>';
+}
+
+function show() {
+  $('name').value = project.name || '';
+  for (const [id,[a,b]] of Object.entries(NUM)) $(id).value = project[a]?.[b] ?? '';
+  for (const [id,[a,b]] of Object.entries(TXT)) $(id).value = project[a]?.[b] ?? '';
+  if (!$('style').value) $('style').value = 'shots';
+  if (!$('transition').value) $('transition').value = 'auto';
+  if (!$('sync').value) $('sync').value = 'true';
+  if (!$('tstyle').value) $('tstyle').value = 'square';
+  if (!$('bstyle').value) $('bstyle').value = 'place';
+  if (!$('counter').value) $('counter').value = 'mined';
+  if (!$('hteaser').value) $('hteaser').value = 'on';
+  if (!$('sfx').value) $('sfx').value = 'on';
+  if (!$('tdepth').value) $('tdepth').value = 24;
+  if (!$('tlength').value) $('tlength').value = 2.5;
+  drawCaps(); drawTimeline();
+}
+
+function read() {
+  project.name = $('name').value;
+  project.schematic = $('schematic').value;
+  for (const [id,[a,b]] of Object.entries(NUM)) { project[a] ??= {}; const v = parseFloat($(id).value); if (!isNaN(v)) project[a][b] = v; }
+  for (const [id,[a,b]] of Object.entries(TXT)) { project[a] ??= {}; project[a][b] = $(id).value; }
+  project.music ??= {}; project.music.file = $('music').value;
+  project.style ??= {}; project.style.font ??= 'Arial Black';
+  project.captions = [...document.querySelectorAll('.cap')].map(r => ({
+    start: parseFloat(r.children[0].value) || 0, end: parseFloat(r.children[1].value) || 0, text: r.children[2].value
+  })).filter(c => c.text.trim() && c.end > c.start);
+  return project;
+}
+
+function drawCaps() {
+  const box = $('caps'); box.innerHTML = '';
+  (project.captions || []).forEach((c, i) => {
+    const r = document.createElement('div'); r.className = 'cap';
+    r.innerHTML = '<input type="number" step="0.1" title="start (s)"><input type="number" step="0.1" title="einde (s)"><input type="text" placeholder="tekst"><button class="x" title="verwijderen">✕</button>';
+    r.children[0].value = c.start; r.children[1].value = c.end; r.children[2].value = c.text;
+    r.children[3].onclick = () => { read(); project.captions.splice(i, 1); drawCaps(); drawTimeline(); };
+    for (const k of [0,1,2]) r.children[k].oninput = drawTimeline;
+    box.append(r);
+  });
+}
+
+function drawTimeline() {
+  const v = id => Math.max(0, parseFloat($(id).value) || 0);
+  const hasS = !!$('schematic').value;
+  const parts = [['Intro', v('intro'), '#7dd3fc'], ['Terraform', v('terraform'), '#86efac'], ['Bouwen', hasS ? v('build') : 0, '#ffe600'], ['Outro', v('outro'), '#f9a8d4']];
+  const total = parts.reduce((s, p) => s + p[1], 0) || 1;
+  $('tl').innerHTML = parts.filter(p => p[1] > 0).map(p => `<div style="width:${p[1]/total*100}%;background:${p[2]}">${p[0]} ${p[1]}s</div>`).join('');
+  $('capbar').innerHTML = [...document.querySelectorAll('.cap')].map(r => {
+    const s = parseFloat(r.children[0].value) || 0, e = parseFloat(r.children[1].value) || 0;
+    return e > s ? `<i style="left:${Math.min(100, s/total*100)}%;width:${Math.min(100 - s/total*100, (e-s)/total*100)}%" title="${r.children[2].value.replace(/"/g,'')}"></i>` : '';
+  }).join('');
+  const warn = total > 60 ? ' Langer dan 60 s: korter houdt kijkers meestal beter vast.' : '';
+  $('total').textContent = `Totale lengte: ${total.toFixed(1)} s (${Math.round(total*60)} frames). Gele balkjes zijn captions.` + warn;
+}
+
+async function load() {
+  project = await api('/api/project');
+  await loadFiles(); show();
+}
+
+async function save() {
+  await api('/api/project', { method:'POST', body: JSON.stringify(read()) });
+}
+
+async function upload(kind, file) {
+  if (!file) return;
+  const r = await api(`/api/upload?kind=${kind}&name=${encodeURIComponent(file.name)}`, { method:'POST', body:file });
+  if (!r.ok) { alert(r.error); return; }
+  read();
+  if (kind === 'schematics') project.schematic = r.name; else { project.music ??= {}; project.music.file = r.name; }
+  await loadFiles(); drawTimeline();
+}
+
+function dropzone(el, input, btn, kind) {
+  btn.onclick = () => input.click();
+  input.onchange = () => upload(kind, input.files[0]);
+  el.ondragover = e => { e.preventDefault(); el.classList.add('over'); };
+  el.ondragleave = () => el.classList.remove('over');
+  el.ondrop = e => { e.preventDefault(); el.classList.remove('over'); upload(kind, e.dataTransfer.files[0]); };
+}
+
+const PHASES = { IDLE:'Klaar om te starten', PREPARING:'Draaiboek berekenen…', RECORDING:'Opnemen', FINISHING:'Opname afsluiten…', RENDERING:'Captions, muziek en eindrender…', DONE:'Klaar ✔', ERROR:'Fout' };
+
+async function poll() {
+  try {
+    const p = await api('/ping');
+    $('conn').innerHTML = p.inWorld ? (p.singleplayer ? `<b>● verbonden</b> · Minecraft ${p.minecraft} · ${p.fps} fps` : '<b class="off">● multiplayer: opnemen kan alleen in singleplayer</b>') : '<b class="off">● open eerst een wereld</b>';
+    const s = await api('/api/status');
+    const busy = ['PREPARING','RECORDING','FINISHING','RENDERING'].includes(s.phase);
+    $('go').disabled = busy || !p.inWorld || !p.singleplayer;
+    $('stop').style.display = s.phase === 'RECORDING' ? '' : 'none';
+    const pct = s.phase === 'RECORDING' && s.totalFrames ? s.frame / s.totalFrames * 100 : (s.phase === 'DONE' ? 100 : (busy ? 100 : 0));
+    document.querySelector('#bar i').style.width = pct + '%';
+    $('phase').textContent = PHASES[s.phase] + (s.phase === 'RECORDING' ? ` · ${s.frame}/${s.totalFrames} frames · ${s.fps.toFixed(0)} fps` : '');
+    $('phase').className = s.phase === 'ERROR' ? 'fail' : (s.phase === 'DONE' ? 'pass' : '');
+    $('msg').textContent = s.message;
+    if (s.phase !== lastPhase && (s.phase === 'DONE' || s.phase === 'ERROR')) {
+      if (s.output) { $('vid').src = '/media?f=' + encodeURIComponent(s.output) + '&t=' + Date.now(); $('vid').style.display = ''; $('outpath').innerHTML = s.export ? 'Opgeslagen in: <code>' + s.export + '</code>' : 'Video: <code>' + s.output + '</code>'; }
+      if (s.judge) { $('judge').style.display = ''; $('judge').innerHTML = s.judge.replace(/</g,'&lt;').replace(/\[PASS\]/g,'<span class="pass">[PASS]</span>').replace(/\[FAIL\]/g,'<span class="fail">[FAIL]</span>'); }
+    }
+    if (busy) { $('vid').style.display = 'none'; $('judge').style.display = 'none'; }
+    lastPhase = s.phase;
+  } catch (e) {
+    $('conn').innerHTML = '<b class="off">● geen verbinding met de game</b>';
+    $('go').disabled = true;
+  }
+  setTimeout(poll, 700);
+}
+
+$('go').onclick = async () => {
+  const r = await api('/api/show/start', { method:'POST', body: JSON.stringify(read()) });
+  if (!r.ok) alert(r.error);
+};
+$('stop').onclick = () => api('/api/show/stop', { method:'POST' });
+$('save').onclick = save;
+$('reload').onclick = load;
+$('addCap').onclick = () => { read(); const last = project.captions.at(-1); const s = last ? last.end + 0.3 : 0.2; project.captions.push({ start:+s.toFixed(1), end:+(s+2).toFixed(1), text:'' }); const keep = project.captions; drawCaps(); document.querySelectorAll('.cap')[keep.length-1]?.children[2].focus(); };
+for (const id of ['intro','terraform','build','outro','schematic']) $(id).addEventListener('input', drawTimeline);
+dropzone($('dropS'), $('fileS'), $('pickS'), 'schematics');
+dropzone($('dropM'), $('fileM'), $('pickM'), 'music');
+load().then(poll);
+</script>
+</body>
+</html>

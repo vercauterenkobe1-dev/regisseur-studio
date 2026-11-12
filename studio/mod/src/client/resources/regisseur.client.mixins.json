@@ -1,0 +1,7 @@
+{
+	"required": true,
+	"package": "be.studio.regisseur.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"client": ["GameRendererMixin", "MinecraftClockMixin", "DisplayInvoker", "BlockDisplayInvoker"],
+	"injectors": { "defaultRequire": 1 }
+}
