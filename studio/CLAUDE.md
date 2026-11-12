@@ -10,7 +10,7 @@ YouTube Shorts maakt: terrein terraformen, een schematic laten bouwen, alles fra
 | Pad | Wat |
 |---|---|
 | `mod/` | Fabric-mod "regisseur" (Java 25, Minecraft 26.2, Loom, Mojang-namen, geen remapping) |
-| `mod/src/client/java/be/studio/regisseur/` | alle code (zie "Architectuur") |
+| `mod/src/client/java/be/studio/regisseur/` | alle code, per pakket: `show/`, `draaiboek/`, `opname/`, `nabewerking/`, `mixin/` (zie `WEGWIJZER.md`) |
 | `mod/src/client/resources/assets/regisseur/ui/index.html` | het studio-scherm (één HTML-bestand) |
 | `mod/run/` | eigen testgame (dev-client); `run/studio/` is daar de studiomap |
 | `pipeline/render.py` | storyboard.json -> final.mp4 (captions, muziek, encode) |
@@ -260,3 +260,13 @@ Open punten:
 - WP1 tempo: `ShowPlan.easeS/easeSInv` voor sleuf, uithollen (oppervlak-aandeel), omhoog; `beatWarp` = 50% dip
   in de 0,1 s voor elke tel; `Director.breath` = hoeksnelheid 0,55x-1,45x per maat. show.json: camAngle, terraTimes.
   `sync_check.py`: D1, D2, D3.
+## Sessie 8: code herschikt (0.9.1, gedrag ongewijzigd)
+Overzicht voor de gebruiker: `WEGWIJZER.md`. Oude namen in de notities hierboven -> nieuwe plek:
+- `Director.shotPose/applyCamera/buildShots/breath` -> `show/Camera.pose/apply/buildShots/breath`
+- `Director.writeShowJson` -> `show/ShowReport.write`; teller/geluid/hook-voorbereiding -> `nabewerking/PostProcess.prepare`
+- `ShowPlan.squareTerraform/ringHead/squareFx` -> `draaiboek/VierkantTerraform.maak/ringHead/effecten`
+- `ShowPlan.digQuarry/quarryFx` -> `GroefTerraform`; vlakmaken + `computeCameraClearance` -> `VlakTerraform`
+- bouwvolgorde -> `Bouwvolgorde.plan`; `smooth/easeBuild/easeInv/easeS/beatWarp/jitter` -> `Easing` (easeInv heet nu easeBuildInv)
+- `treeish/ground/fluid/waterY/groundY/smoothRing/interp` -> `Terrein` (+ `Terrein.zichtlijn` voor vierkant en groef)
+- Director roept nu `plan.terraformFx(level, t, u)` aan in plaats van per stijl.
+- `render.py main()` = 6 benoemde stappen: `plan_timeline`, captions, `make_counter`, `build_master`, `master_audio`, eindencode.

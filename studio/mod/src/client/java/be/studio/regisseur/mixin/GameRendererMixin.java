@@ -1,6 +1,6 @@
 package be.studio.regisseur.mixin;
 
-import be.studio.regisseur.Director;
+import be.studio.regisseur.show.Director;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.renderer.GameRenderer;
 import org.spongepowered.asm.mixin.Mixin;

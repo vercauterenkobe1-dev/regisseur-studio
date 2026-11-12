@@ -5,6 +5,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Invoker;
 
+/** Toegang tot de private setBlockState van een block display (welk blok hij toont). */
 @Mixin(Display.BlockDisplay.class)
 public interface BlockDisplayInvoker {
 	@Invoker("setBlockState") void regisseur$setBlockState(BlockState state);

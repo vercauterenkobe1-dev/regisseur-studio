@@ -1,4 +1,6 @@
-package be.studio.regisseur;
+package be.studio.regisseur.draaiboek;
+
+import be.studio.regisseur.Studio;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;

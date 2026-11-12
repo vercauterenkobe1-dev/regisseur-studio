@@ -1,4 +1,9 @@
-package be.studio.regisseur;
+package be.studio.regisseur.nabewerking;
+
+import be.studio.regisseur.RegisseurClient;
+import be.studio.regisseur.Studio;
+import be.studio.regisseur.draaiboek.ShowPlan;
+import be.studio.regisseur.show.Director;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -9,8 +14,48 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-/** Na de opname: captions + gemasterde muziek + eindencode via de Python-pipeline, daarna de judge. */
+/**
+ * NA DE OPNAME: van ruwe opname (take.mp4) naar de afgewerkte Short.
+ *
+ *   prepare()  direct na het laatste frame (client-thread): gegevens voor de teller (counter.json), de
+ *              geluidseffecten (sfx.json) en de hook (aantallen + lengte van de teaser);
+ *   run()      daarna op de achtergrond: storyboard.json schrijven, pipeline/render.py draaien (captions, teller,
+ *              muziek, geluid, eindencode), een kopie naar de exportmap, en de controles (judge, sync_check,
+ *              audio_check). De uitkomst komt in Director.judge en dus in het studio-scherm.
+ */
 public final class PostProcess {
+	/** Voor de hook: aantallen voor de hooktekst en de lengte van de teaser (precies 1 maat, zodat de muziek op de maat blijft). */
+	static volatile int statMined, statPlaced;
+	static volatile float teaserLen;
+
+	/** Direct na de opname, op de client-thread (textures en geluiden komen uit de geladen resources van de game). */
+	public static void prepare(ShowPlan plan, JsonObject project, Path runDir) {
+		if (plan == null) return;
+		int m = 0;
+		for (ShowPlan.Op o : plan.mined) if (!o.state.canBeReplaced()) m++;
+		statMined = m;
+		statPlaced = plan.buildTargets.size();
+		float bar = 1.5f;
+		if (plan.sync != null && plan.sync.downbeats.size() > 1) {
+			bar = plan.sync.downbeats.get(1) - plan.sync.downbeats.get(0);
+			if (bar > 2.4f) bar /= 2; // trage muziek: halve maat, anders duurt de teaser te lang
+		}
+		teaserLen = bar;
+		if (!"off".equals(Studio.str(Studio.obj(project, "sound"), "sfx", "on"))) {
+			try {
+				Files.writeString(runDir.resolve("sfx.json"), Studio.GSON.toJson(SfxData.build(plan, runDir)), StandardCharsets.UTF_8);
+			} catch (Exception e) { RegisseurClient.LOG.warn("geluidseffecten voorbereiden mislukt", e); }
+		}
+		String cm = Studio.str(Studio.obj(project, "overlay"), "counter", "mined"); // mined (standaard) | placed | off
+		List<ShowPlan.Op> csrc = "placed".equals(cm) ? plan.buildTargets : plan.mined;
+		if (!"off".equals(cm) && !csrc.isEmpty()) {
+			try {
+				Files.writeString(runDir.resolve("counter.json"), Studio.GSON.toJson(CounterData.build(csrc, runDir)), StandardCharsets.UTF_8);
+			} catch (Exception e) { RegisseurClient.LOG.warn("materiaalteller voorbereiden mislukt", e); }
+		}
+	}
+
+	/** Op de achtergrond: eindrender en controles. */
 	public static void run(JsonObject project, Path dir, float seconds) throws Exception {
 		Director.phase = Director.Phase.RENDERING;
 		Director.message = "captions, muziek en eindencode";
@@ -54,15 +99,15 @@ public final class PostProcess {
 		if (seconds > 6) sb.addProperty("lead_trim", 0.4);
 		// Hook: de video opent met het eindresultaat (1 maat), met een hooktekst; daarna begint het verhaal.
 		JsonObject hook = Studio.obj(project, "hook");
-		if (!"off".equals(Studio.str(hook, "teaser", "on")) && Director.teaserLen > 0 && seconds > 6) {
+		if (!"off".equals(Studio.str(hook, "teaser", "on")) && teaserLen > 0 && seconds > 6) {
 			boolean placed = "placed".equals(Studio.str(Studio.obj(project, "overlay"), "counter", "mined"));
-			String def = placed || Director.statMined < 50 ? "{placed} blocks. One by one." : "I mined {mined} blocks for this";
+			String def = placed || statMined < 50 ? "{placed} blocks. One by one." : "I mined {mined} blocks for this";
 			String text = Studio.str(hook, "text", def);
 			if (text.isBlank()) text = def;
-			text = text.replace("{mined}", String.format(java.util.Locale.US, "%,d", Director.statMined))
-					.replace("{placed}", String.format(java.util.Locale.US, "%,d", Director.statPlaced));
+			text = text.replace("{mined}", String.format(java.util.Locale.US, "%,d", statMined))
+					.replace("{placed}", String.format(java.util.Locale.US, "%,d", statPlaced));
 			JsonObject tz = new JsonObject();
-			tz.addProperty("dur", Director.teaserLen);
+			tz.addProperty("dur", teaserLen);
 			tz.addProperty("text", text);
 			sb.add("teaser", tz);
 		}

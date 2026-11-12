@@ -9,6 +9,7 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import be.studio.regisseur.show.Director;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

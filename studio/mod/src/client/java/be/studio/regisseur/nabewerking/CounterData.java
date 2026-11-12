@@ -1,4 +1,7 @@
-package be.studio.regisseur;
+package be.studio.regisseur.nabewerking;
+
+import be.studio.regisseur.RegisseurClient;
+import be.studio.regisseur.draaiboek.ShowPlan;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;

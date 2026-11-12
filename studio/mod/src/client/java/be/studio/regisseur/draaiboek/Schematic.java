@@ -1,4 +1,4 @@
-package be.studio.regisseur;
+package be.studio.regisseur.draaiboek;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import net.minecraft.commands.arguments.blocks.BlockStateParser;

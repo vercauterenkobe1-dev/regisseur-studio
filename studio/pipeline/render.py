@@ -1,12 +1,18 @@
-"""Render: storyboard.json -> Shorts-video (1080x1920, 60 fps) met captions en gemasterde muziek.
+"""Eindrender: storyboard.json (van de mod) -> afgewerkte Short final.mp4 (1080x1920, 60 fps, H.264).
 
-Gebruik:  python render.py storyboard.json [--encoder x265|x264|qsv] [--keep]
+Gebruik:  python render.py storyboard.json [--encoder qsv|x264|x265|hevc] [--out naam.mp4]
 
-Pijplijn (geoptimaliseerd voor i7-1255U + Iris Xe):
-  1. elk fragment -> lossless segment (cover-crop, lanczos, 60 fps CFR, optionele vloeiende zoom)
-  2. segmenten + overgangen + captions -> lossless master.mkv   (bron voor kwaliteitsmeting)
-  3. muziek -> two-pass loudnorm naar -14 LUFS / -1.5 dBTP
-  4. master -> aflevering final.mp4 (BT.709-tags, faststart, GOP 0,5 s)
+Stappen (zie main):
+  1. tijdlijn     eerste 0,4 s wegknippen (onrustig) en de teaser vooraan zetten (hook: eindresultaat eerst)
+  2. captions     woord-voor-woord captions -> captions.ass
+  3. teller       materiaalteller (counter.py) -> counter_panel.png + counter.ass
+  4. beeld        segmenten + overgangen + teller + captions -> lossless master.mkv (bron voor de kwaliteitsmeting)
+  5. geluid       muziek (eigen track of Regisseur Beat uit synth.py) + Minecraft-geluiden (sfx.py),
+                  gemengd en gemasterd op -14 LUFS / -1.5 dBTP -> music_master.wav
+  6. eindencode   master + geluid -> final.mp4 (BT.709, faststart, GOP 0,5 s); timeline.json voor audio_check.py
+
+Hulpbestanden: counter.py (teller), sfx.py (geluiden), synth.py (Regisseur Beat), beats.py (tempo).
+Controles daarna (door de mod gestart): judge.py, sync_check.py, audio_check.py.
 """
 import argparse, json, os, re, subprocess, sys
 
@@ -236,60 +242,77 @@ def main():
     enc = a.encoder or sb.get("encoder", "qsv")
     out = a.out or sb.get("out", "final.mp4")
 
-    teaser, shift = 0.0, 0.0
-    if len(sb["clips"]) == 1 and (sb.get("teaser") or sb.get("lead_trim")):
-        # 1) lead_trim: de eerste frames van een opname zijn onrustig (shader-belichting past zich aan, chunks laden).
-        #    Die knippen we weg; de muziek schuift even ver mee, dus alles blijft op de maat.
-        # 2) Hook: open met het eindresultaat (laatste stuk van de opname), harde cut naar het begin.
-        #    De teaser duurt precies 1 maat, dus de muziek blijft op de maat met de cuts in de opname.
-        lead = float(sb.get("lead_trim", 0))
-        main_clip = dict(sb["clips"][0])
-        main_clip["in"] = main_clip.get("in", 0) + lead
-        main_clip["dur"] -= lead
-        if sb.get("music"):
-            sb["music"]["in"] = sb["music"].get("in", 0) + lead
-        clips = [main_clip]
-        if sb.get("teaser"):
-            teaser = float(sb["teaser"]["dur"])
-            clips.insert(0, dict(main_clip, **{"in": main_clip["in"] + main_clip["dur"] - teaser, "dur": teaser}))
-            sb["transition"] = {"type": "cut", "dur": 0}
-        sb["clips"] = clips
-        shift = teaser - lead
-        caps = []
-        for c in sb.get("captions", []):
-            s, e = max(c["start"] + shift, teaser), c["end"] + shift
-            if e - s > 0.3:
-                caps.append(dict(c, start=s, end=e))
-        if teaser and sb["teaser"].get("text"):
-            caps.insert(0, {"start": 0.0, "end": teaser - 0.03, "text": sb["teaser"]["text"]})
-        sb["captions"] = caps
+    teaser, shift = plan_timeline(sb)                                        # 1. tijdlijn
     ass = None
-    if sb.get("captions"):
+    if sb.get("captions"):                                                   # 2. captions
         ass = "captions.ass"
         build_ass(sb["captions"], sb.get("style", {}), os.path.join(wd, ass))
-    counter, counter_ends = None, []
-    if sb.get("counter"):
-        try:
-            import counter as cnt
-            dur = sum(c["dur"] for c in sb["clips"])
-            counter_ends = cnt.build(sb["counter"], dur, "counter_panel.png", "counter.ass", ass_time,
-                                     offset=shift, hold=teaser)
-            if counter_ends:
-                counter = ("counter_panel.png", "counter.ass")
-        except Exception as e:  # teller is een extraatje: video gaat altijd door
-            print(f"materiaalteller overgeslagen: {e}")
-    total = build_master(sb, wd, ass, counter)
+    counter, counter_ends = make_counter(sb, teaser, shift)                  # 3. teller
+    total = build_master(sb, wd, ass, counter)                               # 4. beeld
     print(f"master.mkv klaar ({total:.2f} s)")
-    audio = ["-i", master_audio(sb, total, wd, teaser, counter_ends)] if sb.get("music") else []
-    st = show_times(sb)  # tijdlijn in video-tijd, voor audio_check.py
-    with open("timeline.json", "w", encoding="utf-8") as f:
-        json.dump({"total": total, "teaser": teaser, "clips": sb["clips"],
-                   "build": st and st["build"], "finale": st and st["finale"], "beat": st and st["beat"]}, f)
-    amap = ["-map", "1:a", "-c:a", "aac", "-b:a", "320k", "-ar", "48000"] if audio else []
+    audio = ["-i", master_audio(sb, total, wd, teaser, counter_ends)] if sb.get("music") else []   # 5. geluid
+    write_timeline(sb, total, teaser)
+    amap = ["-map", "1:a", "-c:a", "aac", "-b:a", "320k", "-ar", "48000"] if audio else []          # 6. eindencode
     sh(["ffmpeg", "-hide_banner", "-y", "-i", "master.mkv", *audio, "-map", "0:v", *amap,
         *ENCODERS[enc], "-pix_fmt", "yuv420p", *COLOR, "-r", str(FPS), "-fps_mode", "cfr",
         "-g", str(FPS // 2), "-t", f"{total:.3f}", "-movflags", "+faststart", out], wd)
     print(f"klaar: {out}  (encoder {enc})")
+
+
+def plan_timeline(sb):
+    """Past sb aan voor de hook. Geeft (teaser, shift): lengte van de teaser en hoeveel alles uit de opname
+    verschuift in de video (teaser - lead_trim).
+      - lead_trim: de eerste frames van een opname zijn onrustig (shader-belichting past zich aan, chunks laden).
+        Die knippen we weg; de muziek schuift even ver mee, dus alles blijft op de maat.
+      - teaser: open met het eindresultaat (laatste stuk van de opname), harde cut naar het begin.
+        De teaser duurt precies 1 maat, dus de muziek blijft op de maat met de cuts in de opname."""
+    if len(sb["clips"]) != 1 or not (sb.get("teaser") or sb.get("lead_trim")):
+        return 0.0, 0.0
+    teaser = 0.0
+    lead = float(sb.get("lead_trim", 0))
+    main_clip = dict(sb["clips"][0])
+    main_clip["in"] = main_clip.get("in", 0) + lead
+    main_clip["dur"] -= lead
+    if sb.get("music"):
+        sb["music"]["in"] = sb["music"].get("in", 0) + lead
+    clips = [main_clip]
+    if sb.get("teaser"):
+        teaser = float(sb["teaser"]["dur"])
+        clips.insert(0, dict(main_clip, **{"in": main_clip["in"] + main_clip["dur"] - teaser, "dur": teaser}))
+        sb["transition"] = {"type": "cut", "dur": 0}
+    sb["clips"] = clips
+    shift = teaser - lead
+    caps = []
+    for c in sb.get("captions", []):
+        s, e = max(c["start"] + shift, teaser), c["end"] + shift
+        if e - s > 0.3:
+            caps.append(dict(c, start=s, end=e))
+    if teaser and sb["teaser"].get("text"):
+        caps.insert(0, {"start": 0.0, "end": teaser - 0.03, "text": sb["teaser"]["text"]})
+    sb["captions"] = caps
+    return teaser, shift
+
+
+def make_counter(sb, teaser, shift):
+    """Materiaalteller. Geeft ((paneel, ass) of None, eindtijden per teller). Een fout stopt de video nooit."""
+    if not sb.get("counter"):
+        return None, []
+    try:
+        import counter as cnt
+        dur = sum(c["dur"] for c in sb["clips"])
+        ends = cnt.build(sb["counter"], dur, "counter_panel.png", "counter.ass", ass_time, offset=shift, hold=teaser)
+        return (("counter_panel.png", "counter.ass") if ends else None), ends
+    except Exception as e:
+        print(f"materiaalteller overgeslagen: {e}")
+        return None, []
+
+
+def write_timeline(sb, total, teaser):
+    """timeline.json: bouwstart, finale en tel in video-tijd, voor audio_check.py."""
+    st = show_times(sb)
+    with open("timeline.json", "w", encoding="utf-8") as f:
+        json.dump({"total": total, "teaser": teaser, "clips": sb["clips"],
+                   "build": st and st["build"], "finale": st and st["finale"], "beat": st and st["beat"]}, f)
 
 
 if __name__ == "__main__":

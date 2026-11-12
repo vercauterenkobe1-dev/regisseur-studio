@@ -1,4 +1,4 @@
-package be.studio.regisseur;
+package be.studio.regisseur.draaiboek;
 
 import be.studio.regisseur.mixin.BlockDisplayInvoker;
 import be.studio.regisseur.mixin.DisplayInvoker;
