@@ -265,7 +265,7 @@ def master_audio(sb, total, wd, teaser=0.0, counter_ends=()):
     ln = (f"loudnorm={target}:measured_I={m['input_i']}:measured_TP={m['input_tp']}:measured_LRA={m['input_lra']}"
           f":measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true")
     sh(["ffmpeg", "-hide_banner", "-y", *inputs, "-filter_complex",
-        f"{pre};[pre]{ln},aresample=48000,alimiter=limit=0.84:level=false,afade=t=out:st={max(0, total - 0.04):.3f}:d=0.04[o]",
+        f"{pre};[pre]{ln},aresample=48000,alimiter=limit=0.84:level=false,afade=t=in:d=0.008,afade=t=out:st={max(0, total - 0.04):.3f}:d=0.04[o]",  # naadloze loop: begin en einde op nul
         "-map", "[o]", "-ac", "2", "-c:a", "pcm_s24le", "music_master.wav"], wd)
     return "music_master.wav"
 

@@ -106,7 +106,9 @@ public final class Camera {
 			float w = smooth((t - p.sqHollowStart + 0.3f) / 1.2f);
 			double lx = head[0] + (p.cx + 0.5 - head[0]) * w, lz = head[1] + (p.cz + 0.5 - head[1]) * w;
 			double lyR = p.y0 - (p.y0 - p.sqFloor) * 0.35 * w * (1 - smooth((t - p.sqRiseStart) / Math.max(0.1f, p.sqRiseDur)));
-			double dd = Math.max(28, p.sqHalf * 3.2) * (1 + 0.15 * w), el = Math.toRadians(64 - 6 * u);
+			// begint dichtbij (sleuf groot in beeld, direct na de teaser) en trekt dan rustig naar achter
+			double pull = 0.65 + 0.35 * smooth((t - p.sqRingStart) / Math.max(0.1f, p.sqRingDur * 0.7f));
+			double dd = Math.max(28, p.sqHalf * 3.2) * pull * (1 + 0.15 * w), el = Math.toRadians(64 - 6 * u);
 			double ang = Math.toRadians(startAngle + 20 + 10 * bl), hdR = dd * Math.cos(el);
 			// de camera draait rond het midden (niet rond de kop), zo zwiept het beeld niet bij de hoeken
 			return new double[]{p.cx + 0.5 + Math.cos(ang) * hdR, p.y0 + dd * Math.sin(el), p.cz + 0.5 + Math.sin(ang) * hdR, lx, lyR, lz};

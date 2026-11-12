@@ -76,7 +76,7 @@ final class VierkantTerraform {
 			for (int dz = -sqHalf - 3; dz <= sqHalf + 3; dz++) {
 				int x = cx + dx, z = cz + dz, cheb = Math.max(Math.abs(dx), Math.abs(dz));
 				int top = surfaceY(level, x, z);
-				float tRing = p.sqRingStart + p.sqRingDur * easeSInv(ringParam(p, dx, dz));
+				float tRing = p.sqRingStart + p.sqRingDur * Easing.easeRingInv(ringParam(p, dx, dz));
 				if (cheb > sqHalf) { // rondom: water dichten (direct naast de sleuf) en bomen weghalen
 					for (int y = top; y >= floor; y--) {
 						BlockState st = level.getBlockState(pos.set(x, y, z));
@@ -125,7 +125,7 @@ final class VierkantTerraform {
 
 	/** Waar de kop van de sleuf is op tijd t (wereld-x, -z), op het midden van de sleuf. */
 	static double[] ringHead(ShowPlan p, float t) {
-		float f = easeS(Math.min(1f, Math.max(0f, (t - p.sqRingStart) / Math.max(0.01f, p.sqRingDur))));
+		float f = Easing.easeRing(Math.min(1f, Math.max(0f, (t - p.sqRingStart) / Math.max(0.01f, p.sqRingDur))));
 		double a = p.sqA0 + f * 2 * Math.PI, ca = Math.cos(a), sa = Math.sin(a);
 		double r = (p.sqHalf - p.sqRing / 2.0) / Math.max(Math.abs(ca), Math.abs(sa)); // op het vierkant, niet op een cirkel
 		return new double[]{p.cx + 0.5 + ca * r, p.cz + 0.5 + sa * r};

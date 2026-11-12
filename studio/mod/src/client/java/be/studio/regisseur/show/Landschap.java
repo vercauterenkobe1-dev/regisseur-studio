@@ -4,8 +4,12 @@ import be.studio.regisseur.draaiboek.ShowPlan;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.server.level.ServerLevel;
 
+import net.minecraft.world.level.chunk.status.ChunkStatus;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.IntConsumer;
 
 /**
@@ -31,10 +35,17 @@ final class Landschap {
 			for (int dz = -r; dz <= r; dz++)
 				if (dx * dx + dz * dz <= r * r) todo.add(new int[]{c0x + dx, c0z + dz});
 		todo.sort((a, b) -> Integer.compare(sq(a, c0x, c0z), sq(b, c0x, c0z))); // van binnen naar buiten
-		final int BATCH = 32;
+		// Parallel: per portie vraagt de server-thread alle chunks tegelijk aan (getChunkFuture), de wereldgeneratie
+		// werkt ze dan op meerdere kernen af; wij wachten buiten de server-thread tot de hele portie klaar is.
+		final int BATCH = 96;
 		for (int i = 0; i < todo.size(); i += BATCH) {
 			final List<int[]> part = todo.subList(i, Math.min(todo.size(), i + BATCH));
-			server.submit(() -> { for (int[] c : part) level.getChunk(c[0], c[1]); }).join();
+			List<CompletableFuture<?>> futures = server.submit(() -> {
+				List<CompletableFuture<?>> fs = new ArrayList<>();
+				for (int[] c : part) fs.add(level.getChunkSource().getChunkFuture(c[0], c[1], ChunkStatus.FULL, true));
+				return fs;
+			}).join();
+			CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get(5, TimeUnit.MINUTES);
 			voortgang.accept((int) Math.round(100.0 * Math.min(todo.size(), i + BATCH) / todo.size()));
 		}
 	}

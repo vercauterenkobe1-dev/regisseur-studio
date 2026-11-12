@@ -186,6 +186,26 @@ def u2_one_size(ass):
     return len(sizes) == 1, f"lettergroottes: {sorted(sizes)}"
 
 
+def u3_no_overlap(ass):
+    """Nooit twee getallen tegelijk op dezelfde plek in de teller."""
+    with open(ass, encoding="utf-8-sig") as f:
+        lines = [l for l in f if l.startswith("Dialogue:")]
+    def secs(s):
+        h, m, x = s.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(x)
+    by_pos = {}
+    for l in lines:
+        parts = l.split(",", 9)
+        m = re.search(r"\\pos\((\d+),(\d+)\)", parts[9])
+        if m:
+            by_pos.setdefault(m.groups(), []).append((secs(parts[1]), secs(parts[2])))
+    bad = 0
+    for spans in by_pos.values():
+        spans.sort()
+        bad += sum(1 for a, b in zip(spans, spans[1:]) if b[0] < a[1] - 0.001)
+    return bad == 0, f"{bad} overlappende getallen"
+
+
 def m2_loudness(path):
     _, _, err = run(["ffmpeg", "-hide_banner", "-nostats", "-i", path, "-map", "0:a",
                      "-af", "ebur128=peak=true", "-f", "null", "-"])
@@ -254,6 +274,7 @@ def main():
     if a.counter and os.path.exists(a.counter):
         results["U1 teller-zone"] = u1_counter_zone(a.counter, a.panel, dur)
         results["U2 een lettergrootte"] = u2_one_size(a.counter)
+        results["U3 geen dubbele getallen"] = u3_no_overlap(a.counter)
     allok = True
     for k, (ok, msg) in results.items():
         mark = "PASS" if ok else ("SKIP" if ok is None else "FAIL")

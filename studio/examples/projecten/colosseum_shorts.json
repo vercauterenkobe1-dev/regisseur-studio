@@ -1,0 +1,61 @@
+{
+    "name":  "Colosseum v2 test",
+    "schematic":  "colosseum-by-ragedsky.schem",
+    "timing":  {
+                   "intro":  0,
+                   "terraform":  10,
+                   "build":  7,
+                   "outro":  2
+               },
+    "camera":  {
+                   "orbitSpeed":  14,
+                   "fov":  70,
+                   "distance":  1,
+                   "style":  "shots",
+                   "transition":  "auto"
+               },
+    "site":  {
+                 "margin":  5,
+                 "radius":  12
+             },
+    "world":  {
+                  "time":  "6000",
+                  "weather":  "clear"
+              },
+    "music":  {
+                  "file":  "Regisseur Beat.wav",
+                  "in":  0,
+                  "sync":  "true"
+              },
+    "captions":  [
+
+                 ],
+    "style":  {
+                  "font":  "Arial Black",
+                  "size":  83,
+                  "highlight":  "FFE600",
+                  "y":  1180,
+                  "words_per_chunk":  3
+              },
+    "terraform":  {
+                      "depth":  8,
+                      "length":  1,
+                      "style":  "square"
+                  },
+    "build":  {
+                  "style":  "place"
+              },
+    "overlay":  {
+                    "counter":  "mined"
+                },
+    "hook":  {
+                 "teaser":  "on",
+                 "text":  "I mined {mined} for this!"
+             },
+    "sound":  {
+                  "sfx":  "on"
+              },
+    "endcard":  {
+                    "mode":  "subscribe"
+                }
+}

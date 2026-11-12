@@ -31,6 +31,22 @@ public final class Easing {
 		return 0.1f * u + 0.9f * s5;
 	}
 
+	/**
+	 * Curve voor de sleuf: die is het eerste wat de kijker na de teaser ziet, dus er moet meteen iets gebeuren.
+	 * Mildere ease-in dan easeS (steilte 0,35 aan het begin in plaats van 0,1), zacht landen blijft.
+	 */
+	public static float easeRing(float u) {
+		u = Math.max(0, Math.min(1, u));
+		return 0.35f * u + 0.65f * smooth(u);
+	}
+
+	/** Omgekeerde van easeRing. */
+	public static float easeRingInv(float v) {
+		float lo = 0, hi = 1;
+		for (int i = 0; i < 24; i++) { float m = (lo + hi) / 2; if (easeRing(m) < v) lo = m; else hi = m; }
+		return (lo + hi) / 2;
+	}
+
 	/** Omgekeerde van easeS: op welk tijdsaandeel is aandeel v klaar. */
 	public static float easeSInv(float v) {
 		float lo = 0, hi = 1;

@@ -177,7 +177,9 @@ def build(counter_json, total, panel_path, ass_path, ass_time, offset=0.0, hold=
             t = cs / 100
             if t > prev_t:
                 lines.append(f"Dialogue: 1,{ass_time(prev_t)},{ass_time(t)},Cnt,,0,0,0,,{pos}{fmt(prev_n)}")
-            prev_t, prev_n = t, cnt
+            # Nooit terug in de tijd: blokken die tijdens de teaser al gemijnd worden (intro 0 s) tellen pas vanaf het
+            # einde van de teaser mee. Anders stonden er twee getallen over elkaar ("25'04").
+            prev_t, prev_n = max(prev_t, t), cnt
         if total > prev_t:  # eindstand met een 'pop'
             pop = "{\\t(0,110,\\fscx122\\fscy122)\\t(110,320,\\fscx100\\fscy100)}"
             lines.append(f"Dialogue: 1,{ass_time(prev_t)},{ass_time(total)},Cnt,,0,0,0,,{pos}{pop}{fmt(prev_n)}")

@@ -114,6 +114,8 @@ public final class PostProcess {
 			String def = placed || statMined < 50 ? "{placed} blocks. One by one." : "I mined {mined} blocks for this";
 			String text = Studio.str(hook, "text", def);
 			if (text.isBlank()) text = def;
+			// "I mined 62,169 for this" is onduidelijk: een getal zonder "blocks" ernaast zegt de kijker niets.
+			if (!text.toLowerCase().contains("block")) text = text.replace("{mined}", "{mined} blocks").replace("{placed}", "{placed} blocks");
 			text = text.replace("{mined}", String.format(java.util.Locale.US, "%,d", statMined))
 					.replace("{placed}", String.format(java.util.Locale.US, "%,d", statPlaced));
 			JsonObject tz = new JsonObject();
