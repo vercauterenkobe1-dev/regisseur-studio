@@ -41,6 +41,11 @@ De mod staat daarna in `studio/mod/build/libs/`. Zet die in de `mods`-map van je
 Start het profiel, open `http://127.0.0.1:47800/` (of de snelkoppeling), kies een schematic en muziek,
 en druk op opnemen. De video komt in de exportmap uit `config.json`.
 
+## Licentie
+
+[MIT](LICENSE): je mag de code vrij gebruiken, aanpassen en verspreiden, zolang de licentietekst en de naam van de
+maker erbij blijven. Bouwwerken (schematics), shaders en muziek van anderen vallen hier niet onder.
+
 ## Controles
 
 Elke opname wordt automatisch gecontroleerd: beeldkwaliteit (VMAF), luidheid, captions en teller in de veilige zone,

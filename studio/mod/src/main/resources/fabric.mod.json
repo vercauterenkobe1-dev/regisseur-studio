@@ -5,7 +5,7 @@
 	"name": "Regisseur",
 	"description": "Eigen video-regisseur: lokale besturingsserver voor camera, wereld en opname.",
 	"authors": ["Studio"],
-	"license": "All-Rights-Reserved",
+	"license": "MIT",
 	"environment": "client",
 	"entrypoints": {
 		"client": ["be.studio.regisseur.RegisseurClient"]
