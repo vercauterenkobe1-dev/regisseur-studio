@@ -74,12 +74,18 @@ def c1_format(path, info):
 
 
 def count_frames(path):
-    _, out, _ = run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
-                     "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", path])
+    # pakketten tellen (zonder decoderen): bij H.264 is elk pakket precies 1 beeld. 1 s in plaats van 25 s.
+    _, out, _ = run(["ffprobe", "-v", "error", "-count_packets", "-select_streams", "v:0",
+                     "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", path])
     try:
         return int(out.strip())
     except ValueError:
         return -1
+
+
+# VMAF op elk 4e beeld: 19 s in plaats van 3 min, score gelijk (99,89 vs 99,90 gemeten op dezelfde video).
+# Het aantal beelden wordt wel volledig vergeleken; de drempels (gem >= 95, 1%-low >= 90) blijven dezelfde.
+VMAF_STEP = 4
 
 
 def c2_vmaf(path, master):
@@ -92,7 +98,7 @@ def c2_vmaf(path, master):
         log = "vmaf.json"
         # frame-index-uitlijning: mkv (1 ms tijdbasis) en mp4 ronden 60 fps-tijdstempels anders af
         fc = ("[0:v]settb=AVTB,setpts=N/60/TB,format=yuv420p[d];[1:v]settb=AVTB,setpts=N/60/TB,format=yuv420p[r];"
-              f"[d][r]libvmaf=log_fmt=json:log_path={log}:n_threads={os.cpu_count()}")
+              f"[d][r]libvmaf=log_fmt=json:log_path={log}:n_threads={os.cpu_count()}:n_subsample={VMAF_STEP}")
         code, _, err = run(["ffmpeg", "-hide_banner", "-i", os.path.abspath(path), "-i", os.path.abspath(master),
                             "-lavfi", fc, "-f", "null", "-"], cwd=td)
         if code != 0:

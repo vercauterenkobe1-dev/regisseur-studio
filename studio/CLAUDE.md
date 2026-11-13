@@ -290,3 +290,19 @@ Overzicht voor de gebruiker: `WEGWIJZER.md`. Oude namen in de notities hierboven
   downloads weg), `mod/maakvideo.ps1` (opname met projectbestand -> bureaublad), hoogtecontrole tegen de bouwlimiet.
 - Kathedraal (546.094 blokken, 240x225x152): nog GEEN goede video. Proefversie op het bureaublad heeft lege verte en geen
   kathedraal in teaser/slotshot. Open: landschap sneller aanmaken, of camera dichter + zichtafstand 16.
+## Sessie 10: sneller afwerken, phonk-muziek, LIKE-knop (0.11.0)
+- Colosseum-Short na 24 u: 21,8K weergaven, 56,6% bleef kijken, 94 likes (0,4%), +10 abonnees (gepost met 0.9.1).
+- Gemeten (Colosseum-take, 20 s): afwerken 72 s + controles 5 min zonder game; bij de gebruiker 10,5 min met game ernaast.
+  Nu: `render.py render_one_pass` = opname + teller + captions + eindbeeld in EEN ffmpeg-ronde die tegelijk final.mp4 en
+  master.mkv schrijft (geluid eerst). Oude weg alleen nog bij zoom/overvloei. 72 s -> ~35 s, SSIM 0,9993 t.o.v. oud.
+  judge: frames tellen via `-count_packets` (51 s -> 1 s), VMAF `n_subsample=4` (3 min -> 19 s, score 99,89 vs 99,90;
+  drempels ongewijzigd). PostProcess draait judge/sync/audio TEGELIJK en zet de game op 10 fps tijdens het afwerken
+  (`remGame`, framerateLimit terug na afloop). Totaal zonder game ~2 min.
+- Fout gevonden: de geluidsmaster was ~0,13 s korter dan de video, dus de fade-out viel erbuiten (M4 soms rood).
+  Nu `apad=whole_dur,atrim=end` voor de fades.
+- Muziek: `synth.render_phonk` (standaard; `music.style` "edm" = oude). Vervormde 808 met octaaflaag + glijden, korte kick,
+  cowbell-melodie, snare 2/4, hats met rollen. Nieuw criterium M5 (audio_check, alleen Regisseur Beat): in de drop
+  100-400 Hz >= -5 dB en 30-80 Hz >= -6 dB van het totaal. EDM: -9,7/-1,4 (FAIL); phonk: -3,6/-4,7 (PASS).
+  Reden: gsm-luidsprekers spelen onder ~150 Hz bijna niets af.
+- Eindbeeld: witte LIKE-pil met duim (ASS-tekening `THUMB`, inline met de tekst) 0,35 s na de rode SUBSCRIBE, erboven.
+  Uit te zetten met project `endcard.like` "off".

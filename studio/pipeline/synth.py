@@ -1,4 +1,4 @@
-"""Regisseur Beat (WP4): een volle EDM-track, per video opnieuw gemaakt op het ritme en de secties van de show.
+"""Regisseur Beat (WP4): een volle track (stijl "phonk" standaard, of "edm"), per video opnieuw gemaakt op het ritme en de secties van de show.
 
 Waarom zelf maken: zo valt de drop exact op de start van de bouw, de klap exact op de finale, en eindigt het
 nummer naadloos in de teaser (loop). Geen auteursrecht. Alles in numpy, 48 kHz stereo.
@@ -248,6 +248,180 @@ def render(arr):
     return st.astype(np.float32)
 
 
+# ================================================================ stijl "phonk" (standaard sinds 0.11)
+# Waarom: de EDM-stijl had zijn bas vooral onder 60 Hz, en dat speelt een gsm-luidspreker niet af (gemeten: gsm-bas
+# 100-400 Hz op -9,7 dB in de drop). Virale edits gebruiken een VERVORMDE 808: diep (sub) en met boventonen die je
+# ook op een gsm hoort. Daarbij de typische phonk-cowbell als melodie, harde kick, snare op 2 en 4, hats met rollen.
+
+def fft_filter(x, lo=None, hi=None):
+    """Hoog-/laagdoorlaat zonder lussen (via FFT), 24 dB/oct. Voor korte buffers (een noot, een maat)."""
+    X = np.fft.rfft(x)
+    f = np.fft.rfftfreq(len(x), 1 / SR) + 1e-6
+    m = np.ones_like(f)
+    if hi:
+        m /= 1 + (f / hi) ** 4
+    if lo:
+        m /= 1 + (lo / f) ** 4
+    return np.fft.irfft(X * m, len(x)).astype(np.float32)
+
+
+def kick_hard():
+    n = int(0.32 * SR)
+    t = np.arange(n) / SR
+    f = 52 + 210 * np.exp(-t * 38)
+    body = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t * 17)  # kort: de 808 vult de diepe bas
+    click = rng.standard_normal(n) * np.exp(-t * 600) * 0.4
+    return (np.tanh(2.2 * (body + click)) * 0.85).astype(np.float32)
+
+
+def bass808(f0, dur, f_from=None, glide=0.07):
+    """808: sinus met korte 'punch' in toonhoogte, optioneel glijden vanaf de vorige noot, dan vervormd
+    (oneven + even boventonen: 2f, 3f, 4f vallen in 100-400 Hz en zijn dus hoorbaar op een gsm)."""
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    f = f0 * 2 ** (np.exp(-t * 45) * 7 / 12)  # punch: start 7 halve tonen hoger, valt in ~30 ms
+    if f_from:
+        g = np.clip(t / glide, 0, 1)
+        f = f * (f_from / f0) ** (1 - (g * g * (3 - 2 * g)))
+    ph = 2 * np.pi * np.cumsum(f) / SR
+    # sub + een laag een octaaf hoger (rond 110 Hz): die tweede laag is wat je op een gsm als 'bas' hoort
+    s = np.sin(ph) + 0.85 * np.sin(2 * ph)
+    drive = 4.5
+    y = np.tanh(drive * (s + 0.22)) - np.tanh(drive * 0.22)  # asymmetrisch: ook even boventonen
+    env = np.exp(-t / 0.85) * np.minimum(1, t / 0.003) * np.minimum(1, (dur - t) / 0.012)
+    return fft_filter((y * env).astype(np.float32), hi=2400) * 0.75
+
+
+def cowbell(midi, dur=0.26):
+    """Phonk-cowbell: twee 'vierkante' tonen (verhouding 1,48) met alleen de eerste boventonen, kort uitsterven."""
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    out = np.zeros(n, np.float32)
+    for ratio, g in ((1.0, 1.0), (1.48, 0.8)):
+        fr = hz(midi) * ratio
+        for h, gh in ((1, 1.0), (3, 0.33), (5, 0.2)):
+            out += (g * gh * np.sin(2 * np.pi * fr * h * t)).astype(np.float32)
+    env = np.exp(-t / 0.075) * 0.75 + np.exp(-t / 0.3) * 0.25
+    env *= np.minimum(1, t / 0.0015) * np.minimum(1, (dur - t) / 0.01)
+    return fft_filter((out * env).astype(np.float32), lo=350, hi=7000) * 0.32
+
+
+def snare():
+    n = int(0.28 * SR)
+    t = np.arange(n) / SR
+    tone = np.sin(2 * np.pi * 190 * t) * np.exp(-t * 28)
+    nz = fft_filter(rng.standard_normal(n).astype(np.float32), lo=1200, hi=11000) * np.exp(-t * 16)
+    return (np.tanh(1.5 * (0.6 * tone + 0.9 * nz)) * 0.6).astype(np.float32)
+
+
+# 808-grondtonen per maat (A-mineur: A1, F1, C2, G1) en het ritme binnen een maat: (tel, halve tonen, lengte, glijden)
+ROOTS = [33, 29, 36, 31]
+BASS_PAT = [(0.0, 0, 1.4, False), (1.5, 0, 0.5, False), (2.0, 0, 0.9, False), (3.0, 12, 0.5, True), (3.5, 7, 0.5, True)]
+# cowbell-melodie: per maat 8 achtsten (None = rust), past bij de akkoorden Am - F - C - G
+BELL = [[81, None, 81, 84, None, 79, None, 76],
+        [77, None, 77, 81, None, 76, None, 74],
+        [76, None, 76, 79, None, 72, None, 74],
+        [79, None, 79, 83, None, 74, None, 71]]
+
+
+def render_phonk(arr):
+    n = int((arr.total + 1) * SR)
+    drums, bass, bells, fx = (np.zeros(n, np.float32) for _ in range(4))
+    beat, bar = arr.beat, 4 * arr.beat
+    K, SN, CL, HC = kick_hard(), snare(), clap(), hat_closed()
+    d0 = arr.downbeats[0] if arr.downbeats else 0.0
+    build_s = arr.build if arr.build is not None else arr.total + 1
+    fin = arr.finale if arr.finale is not None else arr.total + 1
+    in_gap = lambda t: arr.gap is not None and arr.gap - 0.01 <= t < build_s - 0.01
+    kick_times = []
+    for bi in range(math.floor((0 - d0) / bar), int((arr.total - d0) / bar) + 2):
+        t0 = d0 + bi * bar
+        if t0 >= arr.total or t0 + bar <= 0:
+            continue
+        k4 = bi % 4
+        for q in range(4):                                   # ---- drums per tel
+            b = t0 + q * beat
+            if b < -0.01 or b >= arr.total or in_gap(b):
+                continue
+            drop = arr.in_drop(b + 0.001)
+            outro = b >= fin - 0.01 and not drop
+            buildup = not drop and not outro
+            prog = max(0.0, min(1.0, b / max(0.1, build_s))) if buildup else 0.0
+            if drop or buildup or (outro and q in (0, 2)):
+                add(drums, K, b, 1.0 if drop else 0.7 if outro else 0.3 + 0.3 * prog)
+                kick_times.append(b)
+            if drop and q in (1, 3):
+                add(drums, SN, b, 1.0)
+                add(drums, CL, b, 0.5)
+            if drop:                                          # 16den, accent op de off-beat; rol op de laatste tel
+                roll = q == 3 and bi % 2 == 1
+                steps = 6 if roll else 4
+                for s_ in range(steps):
+                    add(drums, HC, b + s_ * beat / steps, (0.55 if s_ % 2 else 0.8) * (0.8 if roll else 1))
+            else:
+                add(drums, HC, b + beat / 2, 0.45 + 0.35 * prog)
+            if buildup and build_s - 2 * bar <= b < build_s - beat - 0.01:  # snare-roll naar de drop
+                sub = 4 if b >= build_s - bar else 2
+                for s_ in range(sub):
+                    tt = b + s_ * beat / sub
+                    add(drums, SN, tt, 0.2 + 0.7 * (tt - (build_s - 2 * bar)) / (2 * bar))
+        drop = arr.in_drop(t0 + 0.01)
+        outro = t0 >= fin - 0.01 and not drop
+        root = ROOTS[k4]
+        if drop:                                              # ---- 808
+            prev = None
+            for (q, semi, ln, gl) in BASS_PAT:
+                f = hz(root + semi)
+                add(bass, bass808(f, ln * beat, prev if gl else None), t0 + q * beat)
+                prev = f
+        elif outro:
+            add(bass, bass808(hz(root), min(bar, 2.0)), t0, 0.8)
+        # ---- cowbell-melodie: drop vol, opbouw gefilterd (gaat open), outro zacht; niet in de stille tel
+        if not in_gap(t0):
+            mel = np.zeros(int(bar * SR) + int(0.3 * SR), np.float32)
+            for e, m in enumerate(BELL[k4]):
+                if m is not None:
+                    add(mel, cowbell(m), e * beat / 2, 1.0 if e % 2 == 0 else 0.8)
+            if drop:
+                g = 1.0
+            elif outro:
+                g, mel = 0.6, fft_filter(mel, hi=3500)
+            else:
+                p = max(0.0, min(1.0, (t0 + bar) / max(0.1, build_s)))
+                g, mel = 0.5 + 0.4 * p, fft_filter(mel, hi=600 + 5000 * p ** 2)
+            add(bells, mel, t0, g)
+    # riser + impacts zoals in de EDM-stijl
+    if arr.build is not None and arr.build < arr.total:
+        rs, re_ = max(0.0, arr.build - 2 * bar), arr.build - beat
+        nr = int((re_ - rs) * SR)
+        if nr > 0:
+            x = rng.standard_normal(nr).astype(np.float32)
+            ramp = np.linspace(0, 1, nr, dtype=np.float32)
+            x = lowpass(x, 300 + 9000 * ramp ** 2) * (ramp ** 1.5) * 0.45
+            nf = min(nr, int(0.015 * SR))
+            x[-nf:] *= np.linspace(1, 0, nf, dtype=np.float32)
+            add(fx, x, rs)
+        add(fx, impact(), arr.build, 0.9)
+    if arr.finale is not None and arr.finale < arr.total:
+        add(fx, impact(), arr.finale, 1.0)
+        add(fx, noise_hit(2.2, 0.6, 0.97) * 0.3, arr.finale)
+    duck = pump_env(n, kick_times, depth=0.55)          # 808 en bel buigen kort weg onder de kick
+    if arr.gap is not None and arr.build is not None:   # stille tel voor de drop
+        g0, g1 = int(arr.gap * SR), int(arr.build * SR)
+        fade = int(0.006 * SR)
+        m = np.ones(n, np.float32)
+        m[g0:g1] = 0.0
+        m[max(0, g0 - fade):g0] = np.linspace(1, 0, g0 - max(0, g0 - fade))
+        for s_ in (drums, bass, bells):
+            s_ *= m
+    mono = drums + bass * duck * 1.4
+    left = mono + bells * duck + fx
+    right = mono + np.roll(bells, int(0.009 * SR)) * duck + fx   # bel iets breder
+    st = np.stack([left, right], axis=1)[: int(arr.total * SR)]
+    st = np.tanh(st * 0.85) * 0.92
+    return st.astype(np.float32)
+
+
 def impact():
     n = int(1.4 * SR)
     t = np.arange(n) / SR
@@ -263,8 +437,9 @@ def write(st, path):
         raise RuntimeError("synth: wav schrijven mislukt")
 
 
-def for_video(show, clips, total, out, teaser=0.0, td=0.0):
-    """Maak de track voor deze video. show = show.json (opname-tijd); clips zoals in render.py."""
+def for_video(show, clips, total, out, teaser=0.0, td=0.0, style="phonk"):
+    """Maak de track voor deze video. show = show.json (opname-tijd); clips zoals in render.py.
+    style: "phonk" (standaard: vervormde 808, cowbell) of "edm" (de oude Regisseur Beat)."""
     from sfx import clip_map, to_video
     cmap = clip_map(clips, td)
     music = show.get("music") or {}
@@ -284,7 +459,7 @@ def for_video(show, clips, total, out, teaser=0.0, td=0.0):
         spans.append((build, fin if fin else total))
     arr = Arr(total, beat, downs, build=build, drop_spans=spans, finale=fin,
               gap_before=(build - beat) if build is not None else None)
-    write(render(arr), out)
+    write(render_phonk(arr) if style == "phonk" else render(arr), out)
     return {"bpm": 60 / beat, "build": build, "finale": fin}
 
 

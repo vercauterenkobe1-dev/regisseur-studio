@@ -135,6 +135,25 @@ def m4(d, tl):
     worst = max(v for _, v in checks)
     return worst < 0.1, ", ".join(f"{k} {v:.3f}" for k, v in checks) + " (max 0.1)"
 
+def m5(d, tl):
+    """Echte bas, ook op een gsm: in de drop (bouw tot finale) moet de band 100-400 Hz (wat een gsm-luidspreker nog
+    afspeelt) minstens -5 dB van het totaal zijn, en de diepe bas 30-80 Hz minstens -6 dB (hij mag niet verdwijnen).
+    Vastgelegd voor de phonk-stijl (0.11); oude EDM-stijl mat -9,7 / -1,4 dB. Alleen voor de eigen Regisseur Beat."""
+    b, fin = tl.get("build"), tl.get("finale") or tl.get("total")
+    if b is None or not tl.get("synth"):
+        return None, "alleen voor de Regisseur Beat met een bouw"
+    x = load(os.path.join(d, "music_stem.wav"))
+    seg = x[int(b * SR): int(fin * SR)]
+    if len(seg) < SR:
+        return None, "drop te kort"
+    S = np.abs(np.fft.rfft(seg * np.hanning(len(seg)))) ** 2
+    fr = np.fft.rfftfreq(len(seg), 1 / SR)
+    tot = S[fr > 20].sum()
+    band = lambda lo, hi: 10 * np.log10(S[(fr >= lo) & (fr < hi)].sum() / tot)
+    phone, sub = band(100, 400), band(30, 80)
+    return phone >= -5 and sub >= -6, f"gsm-bas 100-400 Hz {phone:.1f} dB (min -5), diepe bas 30-80 Hz {sub:.1f} dB (min -6)"
+
+
 def main():
     d = os.path.abspath(sys.argv[1])
     tl = json.load(open(os.path.join(d, "timeline.json"), encoding="utf-8"))
@@ -148,6 +167,7 @@ def main():
     if os.path.exists(os.path.join(d, "music_stem.wav")):
         res["M1 drop op de bouw"] = m1(d, tl)
         res["M3 boog"] = m3(d, tl)
+        res["M5 echte bas"] = m5(d, tl)
     if os.path.exists(os.path.join(d, "music_master.wav")):
         res["M4 geen klikken"] = m4(d, tl)
     allok = True

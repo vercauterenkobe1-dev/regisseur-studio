@@ -6,7 +6,8 @@ Stappen (zie main):
   1. tijdlijn     eerste 0,4 s wegknippen (onrustig) en de teaser vooraan zetten (hook: eindresultaat eerst)
   2. captions     woord-voor-woord captions -> captions.ass
   3. teller       materiaalteller (counter.py) -> counter_panel.png + counter.ass
-  4. beeld        segmenten + overgangen + teller + captions -> lossless master.mkv (bron voor de kwaliteitsmeting)
+  4. beeld        opname + teller + captions + eindbeeld -> final.mp4 EN lossless master.mkv (voor de
+                  kwaliteitsmeting), samen in een ffmpeg-ronde (render_one_pass; oude weg bij zoom/overvloei)
   5. geluid       muziek (eigen track of Regisseur Beat uit synth.py) + Minecraft-geluiden (sfx.py),
                   gemengd en gemasterd op -14 LUFS / -1.5 dBTP -> music_master.wav
   6. eindencode   master + geluid -> final.mp4 (BT.709, faststart, GOP 0,5 s); timeline.json voor audio_check.py
@@ -113,9 +114,16 @@ def rounded_rect(w, h, r):
     return " ".join(pts)
 
 
+# Duim omhoog (YouTube-stijl), tekenpad op een raster van ~100 x 100: mouw links, vuist met duim omhoog
+THUMB = ("m 0 44 l 22 44 l 22 100 l 0 100 "
+         "m 30 46 l 50 10 b 55 1 70 3 68 18 l 64 38 l 90 38 b 101 38 104 50 97 56 "
+         "b 104 62 101 72 94 74 b 99 80 95 90 87 90 b 91 96 85 100 78 100 l 30 100")
+
+
 def build_endcard(total, card, path):
-    """Rode YouTube-subscribeknop de laatste N seconden: popt binnen, klopt een keer, blijft staan tot het einde.
-    card = {"text": "SUBSCRIBE", "dur": 3, "y": 1300}"""
+    """Eindbeeld de laatste N seconden: rode SUBSCRIBE-knop popt binnen, 0,35 s later een witte LIKE-knop met
+    duim erboven; elk klopt een keer en blijft staan tot het einde.
+    card = {"text": "SUBSCRIBE", "dur": 3, "y": 1300, "like": true}"""
     dur = float(card.get("dur", 3))
     t0, t1 = max(0.0, total - dur), total
     y = int(card.get("y", 1300))
@@ -124,19 +132,36 @@ def build_endcard(total, card, path):
     pop = r"\fscx30\fscy30\t(0,170,\fscx112\fscy112)\t(170,300,\fscx100\fscy100)"
     pulse = r"\t(1400,1550,\fscx106\fscy106)\t(1550,1750,\fscx100\fscy100)"
     pos = rf"\an5\pos(540,{y})"
+    ev = [
+        rf"Dialogue: 3,{ass_time(t0)},{ass_time(t1)},Box,,0,0,0,,{{{pos}\fad(120,0){pop}{pulse}\p1}}{rounded_rect(w, h, 34)}",
+        rf"Dialogue: 4,{ass_time(t0)},{ass_time(t1)},Txt,,0,0,0,,{{{pos}\fad(120,0){pop}{pulse}}}{text}",
+    ]
+    if card.get("like", True) and dur >= 1.0:
+        # LIKE boven SUBSCRIBE, 0,35 s later (twee aparte 'pops' trekken meer aandacht dan een)
+        lt0, ly = t0 + 0.35, y - h - 40
+        lw = 400
+        lpos = rf"\an5\pos(540,{ly})"
+        lpulse = r"\t(1050,1200,\fscx106\fscy106)\t(1200,1400,\fscx100\fscy100)"
+        # duim + tekst als een regel (inline tekening), zodat ze samen centreren en samen poppen
+        ev += [
+            rf"Dialogue: 3,{ass_time(lt0)},{ass_time(t1)},LBox,,0,0,0,,{{{lpos}\fad(120,0){pop}{lpulse}\p1}}{rounded_rect(lw, h, 75)}",
+            rf"Dialogue: 4,{ass_time(lt0)},{ass_time(t1)},LTxt,,0,0,0,,{{{lpos}\fad(120,0){pop}{lpulse}}}"
+            rf"{{\p1\pbo14}}{THUMB}{{\p0}}  LIKE",
+        ]
     lines = [
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {W}", f"PlayResY: {H}", "ScaledBorderAndShadow: yes", "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic,"
         " Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment,"
         " MarginL, MarginR, MarginV, Encoding",
-        # knop: YouTube-rood (#FF0000, in ASS BGR) met zachte schaduw; tekst: wit, vet
+        # SUBSCRIBE: YouTube-rood (#FF0000, in ASS BGR) met zachte schaduw; tekst wit, vet
         "Style: Box,Arial,20,&H000000FF&,&H000000FF&,&H00000000&,&H70000000&,0,0,0,0,100,100,0,0,1,0,6,5,0,0,0,1",
         "Style: Txt,Arial Black,84,&H00FFFFFF&,&H00FFFFFF&,&H00000000&,&H00000000&,-1,0,0,0,100,100,2,0,1,0,0,5,0,0,0,1",
+        # LIKE: witte pil, zwarte duim en tekst
+        "Style: LBox,Arial,20,&H00FFFFFF&,&H00FFFFFF&,&H00000000&,&H70000000&,0,0,0,0,100,100,0,0,1,0,6,5,0,0,0,1",
+        "Style: LTxt,Arial Black,84,&H000F0F0F&,&H000F0F0F&,&H00000000&,&H00000000&,-1,0,0,0,100,100,2,0,1,0,0,5,0,0,0,1",
         "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-        rf"Dialogue: 3,{ass_time(t0)},{ass_time(t1)},Box,,0,0,0,,{{{pos}\fad(120,0){pop}{pulse}\p1}}{rounded_rect(w, h, 34)}",
-        rf"Dialogue: 4,{ass_time(t0)},{ass_time(t1)},Txt,,0,0,0,,{{{pos}\fad(120,0){pop}{pulse}}}{text}",
-    ]
+    ] + ev
     with open(path, "w", encoding="utf-8-sig") as f:
         f.write("\n".join(lines) + "\n")
 
@@ -219,7 +244,8 @@ def music_stem(sb, total, wd, teaser):
     st = show_times(sb)
     if os.path.basename(music["src"]).lower().startswith("regisseur beat") and st:
         import synth
-        synth.for_video(st["show"], sb["clips"], total, os.path.join(wd, "music_stem.wav"), teaser=teaser)
+        synth.for_video(st["show"], sb["clips"], total, os.path.join(wd, "music_stem.wav"), teaser=teaser,
+                        style=music.get("style", "phonk"))
         return "music_stem.wav", st
     src = os.path.abspath(music["src"])
     fin, fout = music.get("fade_in", 0.05), music.get("fade_out", 1.0)
@@ -265,7 +291,10 @@ def master_audio(sb, total, wd, teaser=0.0, counter_ends=()):
     ln = (f"loudnorm={target}:measured_I={m['input_i']}:measured_TP={m['input_tp']}:measured_LRA={m['input_lra']}"
           f":measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true")
     sh(["ffmpeg", "-hide_banner", "-y", *inputs, "-filter_complex",
-        f"{pre};[pre]{ln},aresample=48000,alimiter=limit=0.84:level=false,afade=t=in:d=0.008,afade=t=out:st={max(0, total - 0.08):.3f}:d=0.08[o]",  # naadloze loop: begin en einde op nul
+        # naadloze loop: begin en einde op nul. apad+atrim: exact even lang als de video (de limiters schuiven het
+        # einde anders ~0,1 s op, waardoor de fade-out buiten het geluid viel en de loop klikte)
+        f"{pre};[pre]{ln},aresample=48000,alimiter=limit=0.84:level=false,apad=whole_dur={total:.3f},atrim=end={total:.3f},"
+        f"afade=t=in:d=0.008,afade=t=out:st={max(0, total - 0.08):.3f}:d=0.08[o]",
         "-map", "[o]", "-ac", "2", "-c:a", "pcm_s24le", "music_master.wav"], wd)
     return "music_master.wav"
 
@@ -293,6 +322,16 @@ def main():
     counter, counter_ends = make_counter(sb, teaser, shift)                  # 3. teller
     if sb.get("endcard"):                                                    #    + subscribe-eindbeeld
         build_endcard(sum(c["dur"] for c in sb["clips"]), sb["endcard"], os.path.join(wd, "endcard.ass"))
+    if one_pass_ok(sb):
+        # Snelle weg (standaard): geluid eerst, daarna beeld in EEN ffmpeg-ronde: opname inlezen, teller, captions
+        # en eindbeeld erop, en tegelijk de eindvideo en de lossless master (voor de kwaliteitsmeting) wegschrijven.
+        # Scheelt twee keer de hele video opnieuw coderen en inlezen.
+        total = sum(c["dur"] for c in sb["clips"])
+        audio = master_audio(sb, total, wd, teaser, counter_ends) if sb.get("music") else None    # 5. geluid
+        write_timeline(sb, total, teaser)
+        render_one_pass(sb, wd, ass, counter, audio, enc, out, total)                        # 4+6. beeld + eindencode
+        print(f"klaar: {out}  (encoder {enc}, {total:.2f} s, in een ronde)")
+        return
     total = build_master(sb, wd, ass, counter)                               # 4. beeld
     print(f"master.mkv klaar ({total:.2f} s)")
     audio = ["-i", master_audio(sb, total, wd, teaser, counter_ends)] if sb.get("music") else []   # 5. geluid
@@ -302,6 +341,44 @@ def main():
         *ENCODERS[enc], "-pix_fmt", "yuv420p", *COLOR, "-r", str(FPS), "-fps_mode", "cfr",
         "-g", str(FPS // 2), "-t", f"{total:.3f}", "-movflags", "+faststart", out], wd)
     print(f"klaar: {out}  (encoder {enc})")
+
+
+def one_pass_ok(sb):
+    """De snelle weg kan als er geen zoom en geen overvloei-overgang is (zo maakt de mod het altijd)."""
+    clips = sb["clips"]
+    if any(tuple(c.get("zoom", [1.0, 1.0])) != (1.0, 1.0) for c in clips):
+        return False
+    return len(clips) == 1 or sb.get("transition", {}).get("type") == "cut"
+
+
+def render_one_pass(sb, wd, ass, counter, audio, enc, out, total):
+    inputs, fc = [], []
+    for i, c in enumerate(sb["clips"]):
+        inputs += ["-ss", str(c.get("in", 0)), "-t", str(c["dur"]), "-i", os.path.abspath(c["src"])]
+        fc.append(f"[{i}:v]fps={FPS},scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,"
+                  f"crop={W}:{H},setsar=1,format=yuv420p,setpts=PTS-STARTPTS[s{i}]")
+    n = len(sb["clips"])
+    prev = "[s0]"
+    if n > 1:
+        fc.append("".join(f"[s{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[cc]")
+        prev = "[cc]"
+    idx = n
+    if counter:
+        panel, cass = counter
+        inputs += ["-i", panel]
+        fc.append(f"{prev}[{idx}:v]overlay=0:0:format=auto,ass={cass}[cnt]")
+        prev, idx = "[cnt]", idx + 1
+    caps = f"ass={ass}" if ass else "null"
+    end = ",ass=endcard.ass" if os.path.exists(os.path.join(wd, "endcard.ass")) else ""
+    fc.append(f"{prev}{caps}{end},format=yuv420p,split=2[vm][vf]")
+    amap = []
+    if audio:
+        inputs += ["-i", audio]
+        amap = ["-map", f"{idx}:a", "-c:a", "aac", "-b:a", "320k", "-ar", "48000"]
+    sh(["ffmpeg", "-hide_banner", "-y", *inputs, "-filter_complex", ";".join(fc),
+        "-map", "[vm]", "-r", str(FPS), "-fps_mode", "cfr", *LOSSLESS, "master.mkv",
+        "-map", "[vf]", *amap, *ENCODERS[enc], "-pix_fmt", "yuv420p", *COLOR, "-r", str(FPS), "-fps_mode", "cfr",
+        "-g", str(FPS // 2), "-t", f"{total:.3f}", "-movflags", "+faststart", out], wd)
 
 
 def plan_timeline(sb):
@@ -357,7 +434,8 @@ def write_timeline(sb, total, teaser):
     st = show_times(sb)
     with open("timeline.json", "w", encoding="utf-8") as f:
         json.dump({"total": total, "teaser": teaser, "clips": sb["clips"],
-                   "build": st and st["build"], "finale": st and st["finale"], "beat": st and st["beat"]}, f)
+                   "build": st and st["build"], "finale": st and st["finale"], "beat": st and st["beat"],
+                   "synth": bool(sb.get("music")) and os.path.basename(sb["music"]["src"]).lower().startswith("regisseur beat")}, f)
 
 
 if __name__ == "__main__":

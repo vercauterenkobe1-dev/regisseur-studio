@@ -56,8 +56,35 @@ public final class PostProcess {
 		}
 	}
 
-	/** Op de achtergrond: eindrender en controles. */
+	/** Op de achtergrond: eindrender en controles. De game draait zolang op 10 beelden/s (zie {@link #remGame}). */
 	public static void run(JsonObject project, Path dir, float seconds) throws Exception {
+		remGame(true);
+		try { runInner(project, dir, seconds); } finally { remGame(false); }
+	}
+
+	private static Integer prevFpsLimit;
+
+	/**
+	 * Tijdens het afwerken heeft de game niets te doen, maar tekent hij met shaders op volle snelheid verder en neemt
+	 * hij de processor en grafische kaart in beslag die ffmpeg nodig heeft (gemeten: afwerken 4,5 min met de game
+	 * ernaast, 72 s zonder). Daarom even op 10 beelden per seconde, daarna terug zoals het was.
+	 */
+	private static void remGame(boolean on) {
+		net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+		mc.execute(() -> {
+			try {
+				if (on && prevFpsLimit == null) {
+					prevFpsLimit = mc.options.framerateLimit().get();
+					mc.options.framerateLimit().set(10);
+				} else if (!on && prevFpsLimit != null) {
+					mc.options.framerateLimit().set(prevFpsLimit);
+					prevFpsLimit = null;
+				}
+			} catch (Throwable t) { RegisseurClient.LOG.warn("beeldsnelheid aanpassen mislukt", t); }
+		});
+	}
+
+	private static void runInner(JsonObject project, Path dir, float seconds) throws Exception {
 		Tijdschatting.naar(Tijdschatting.Stap.AFWERKEN);
 		Director.phase = Director.Phase.RENDERING;
 		Director.message = "captions, muziek en eindencode";
@@ -90,6 +117,7 @@ public final class PostProcess {
 			m.addProperty("in", Studio.num(music, "in", 0));
 			m.addProperty("fade_in", 0.05);
 			m.addProperty("fade_out", 1.2);
+			m.addProperty("style", Studio.str(music, "style", "phonk")); // Regisseur Beat: phonk (standaard) of edm
 			sb.add("music", m);
 		}
 		if (project.has("captions")) sb.add("captions", project.get("captions"));
@@ -103,6 +131,7 @@ public final class PostProcess {
 			JsonObject ec = new JsonObject();
 			ec.addProperty("text", Studio.str(endcard, "text", "SUBSCRIBE"));
 			ec.addProperty("dur", Studio.num(endcard, "dur", 3));
+			ec.addProperty("like", !"off".equals(Studio.str(endcard, "like", "on"))); // LIKE-knop boven SUBSCRIBE
 			sb.add("endcard", ec);
 		}
 		// eerste frames: shader-belichting en chunks komen nog op gang; weg ermee (muziek schuift mee)
@@ -150,8 +179,9 @@ public final class PostProcess {
 				RegisseurClient.LOG.warn("kopie naar exportmap mislukt", e);
 			}
 		}
-		Director.message = "kwaliteit meten";
+		Director.message = "video staat klaar; kwaliteit meten";
 		Tijdschatting.naar(Tijdschatting.Stap.CONTROLEREN);
+		// De drie controles tegelijk (ze gebruiken elk vooral een andere kern), in plaats van na elkaar.
 		java.util.ArrayList<String> j = new java.util.ArrayList<>(List.of(python, pipeline.resolve("judge.py").toString(),
 				fin.toString(), "--master", dir.resolve("master.mkv").toString()));
 		if (Files.exists(dir.resolve("captions.ass"))) { j.add("--captions"); j.add(dir.resolve("captions.ass").toString()); }
@@ -159,17 +189,25 @@ public final class PostProcess {
 			j.add("--counter"); j.add(dir.resolve("counter.ass").toString());
 			j.add("--panel"); j.add(dir.resolve("counter_panel.png").toString());
 		}
-		exec(dir, "judge.log", j);
-		String jt = Files.exists(dir.resolve("judge.log")) ? Files.readString(dir.resolve("judge.log")) : "";
+		List<Process> checks = new java.util.ArrayList<>();
+		List<String> logs = new java.util.ArrayList<>();
+		checks.add(start(dir, "judge.log", j)); logs.add("judge.log");
 		if (Files.exists(dir.resolve("show.json")) && Files.exists(pipeline.resolve("sync_check.py"))) {
-			exec(dir, "sync.log", List.of(python, pipeline.resolve("sync_check.py").toString(), dir.resolve("show.json").toString()));
-			jt += "\n" + Files.readString(dir.resolve("sync.log"));
+			checks.add(start(dir, "sync.log", List.of(python, pipeline.resolve("sync_check.py").toString(), dir.resolve("show.json").toString())));
+			logs.add("sync.log");
 		}
 		if (Files.exists(dir.resolve("timeline.json")) && Files.exists(pipeline.resolve("audio_check.py"))) {
-			exec(dir, "audio.log", List.of(python, pipeline.resolve("audio_check.py").toString(), dir.toString()));
-			jt += "\n" + Files.readString(dir.resolve("audio.log"));
+			checks.add(start(dir, "audio.log", List.of(python, pipeline.resolve("audio_check.py").toString(), dir.toString())));
+			logs.add("audio.log");
 		}
-		Director.judge = jt;
+		for (Process p : checks) if (!p.waitFor(30, TimeUnit.MINUTES)) p.destroyForcibly();
+		StringBuilder jt = new StringBuilder();
+		for (String l : logs) {
+			if (!Files.exists(dir.resolve(l))) continue;
+			if (jt.length() > 0) jt.append('\n');
+			jt.append(Files.readString(dir.resolve(l)));
+		}
+		Director.judge = jt.toString();
 		Files.deleteIfExists(dir.resolve("master.mkv")); // lossless tussenbestand is groot
 		for (int i = 0; i < 9; i++) Files.deleteIfExists(dir.resolve(String.format("seg%02d.mkv", i)));
 		Director.phase = Director.Phase.DONE;
@@ -178,14 +216,18 @@ public final class PostProcess {
 	}
 
 	private static int exec(Path dir, String log, List<String> cmd) throws Exception {
+		Process p = start(dir, log, cmd);
+		if (!p.waitFor(30, TimeUnit.MINUTES)) { p.destroyForcibly(); return -1; }
+		return p.exitValue();
+	}
+
+	private static Process start(Path dir, String log, List<String> cmd) throws Exception {
 		ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true)
 				.redirectOutput(dir.resolve(log).toFile());
 		String ff = Studio.cfg("ffmpeg", "");
 		if (!ff.isBlank() && Path.of(ff).getParent() != null) // pipeline roept 'ffmpeg' via PATH aan
 			pb.environment().merge("Path", Path.of(ff).getParent().toString(), (old, add) -> add + ";" + old);
 		pb.environment().put("PYTHONIOENCODING", "utf-8");
-		Process p = pb.start();
-		if (!p.waitFor(30, TimeUnit.MINUTES)) { p.destroyForcibly(); return -1; }
-		return p.exitValue();
+		return pb.start();
 	}
 }
